@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crypto-fpi",
+    "f-node",
+    "i-client",
+    "p-server",
+    "t-client"
+]

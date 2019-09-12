@@ -1,0 +1,8 @@
+[package]
+name = "f-node"
+version = "0.1.0"
+authors = ["shumy <micaelpedrosa@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+clap = "^2.33"
