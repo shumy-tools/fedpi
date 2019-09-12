@@ -1,11 +1,11 @@
 [package]
-name = "crypto-fpi"
+name = "core-fpi"
 version = "0.1.0"
 authors = ["shumy <micaelpedrosa@gmail.com>"]
 edition = "2018"
 
 [lib]
-name = "crypto_fpi"
+name = "core_fpi"
 
 [dependencies]
 curve25519-dalek = "^1"

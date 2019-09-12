@@ -1,14 +1,14 @@
-use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
+use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 
 use sha2::{Sha512, Digest};
 
-const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+use crate::G;
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature
 //-----------------------------------------------------------------------------------------------------------
+#[derive(Debug, Copy, Clone)]
 pub struct Signature {
     pub c: Scalar,
     pub p: Scalar
@@ -60,6 +60,28 @@ impl Signature {
         let c = Scalar::from_hash(hasher);
 
         c == self.c
+    }
+}
+
+//-----------------------------------------------------------------------------------------------------------
+// Schnorr's signature with PublicKey (Extended Signature)
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Debug, Copy, Clone)]
+pub struct ExtSignature {
+    pub key: CompressedRistretto,
+    pub sig: Signature
+}
+
+impl ExtSignature {
+    #[allow(non_snake_case)]
+    pub fn new(s: Scalar, P: CompressedRistretto, data: &Vec<Box<[u8]>>) -> Self {
+        let _sig = Signature::sign(s, P, data);
+        ExtSignature { key: P, sig: _sig }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn verify(&self, data: &Vec<Box<[u8]>>) -> bool {
+        self.sig.verify(self.key, data)
     }
 }
 
