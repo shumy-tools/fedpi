@@ -17,7 +17,7 @@ pub struct Subject {
 }
 
 impl Subject {
-    loaders!(sid; profiles);
+    constructors!(sid; profiles);
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -33,7 +33,7 @@ pub struct Profile {
 }
 
 impl Profile {
-    loaders!(pid, lurl; keys);
+    constructors!(pid, lurl; keys);
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -46,5 +46,5 @@ pub struct ProfileKey {
 }
 
 impl ProfileKey {
-    loaders!(pid);
+    constructors!(pid);
 }

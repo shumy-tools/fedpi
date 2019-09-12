@@ -1,4 +1,4 @@
-use curve25519_dalek::ristretto::CompressedRistretto;
+use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 use curve25519_dalek::scalar::Scalar;
 
 use sha2::{Sha512, Digest};
@@ -16,7 +16,7 @@ pub struct Signature {
 
 impl Signature {
     #[allow(non_snake_case)]
-    pub fn sign(s: Scalar, P: CompressedRistretto, data: &Vec<Box<[u8]>>) -> Self {
+    pub fn sign(s: &Scalar, P: &CompressedRistretto, data: &[Box<[u8]>]) -> Self {
         let mut hasher = Sha512::new()
             .chain(s.as_bytes());
         
@@ -37,17 +37,17 @@ impl Signature {
 
         let _c = Scalar::from_hash(hasher);
 
-        Signature { c: _c, p: m - _c * s }
+        Self { c: _c, p: m - _c * s }
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, P: CompressedRistretto, data: &Vec<Box<[u8]>>) -> bool {
+    pub fn verify(&self, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[Box<[u8]>]) -> bool {
         let Ps = P.decompress();
         if Ps.is_none() {
             return false;
         }
 
-        let M = self.c * Ps.unwrap() + self.p * G;
+        let M = self.c * Ps.unwrap() + self.p * BasePoint;
 
         let mut hasher = Sha512::new()
             .chain(P.as_bytes())
@@ -74,14 +74,14 @@ pub struct ExtSignature {
 
 impl ExtSignature {
     #[allow(non_snake_case)]
-    pub fn new(s: Scalar, P: CompressedRistretto, data: &Vec<Box<[u8]>>) -> Self {
-        let _sig = Signature::sign(s, P, data);
-        ExtSignature { key: P, sig: _sig }
+    pub fn sign(s: Scalar, P: CompressedRistretto, data: &[Box<[u8]>]) -> Self {
+        let _sig = Signature::sign(&s, &P, data);
+        Self { key: P, sig: _sig }
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, data: &Vec<Box<[u8]>>) -> bool {
-        self.sig.verify(self.key, data)
+    pub fn verify(&self, data: &[Box<[u8]>]) -> bool {
+        self.sig.verify(&self.key, &G, data)
     }
 }
 
@@ -96,9 +96,9 @@ mod tests {
         let a = rnd_scalar();
         let Pa = (a * G).compress();
 
-        let data: Vec<Box<[u8]>> = vec![Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
-
-        let sig = Signature::sign(a, Pa, &data);
-        assert!(sig.verify(Pa, &data) == true);
+        let data: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
+        let sig = ExtSignature::sign(a, Pa, data);
+        
+        assert!(sig.verify(data) == true);
     }
 }
