@@ -341,11 +341,9 @@ impl Degree for RistrettoPolynomial {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::rnd_scalar;
 
-    use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
-    
-    const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+    use crate::G;
+    use crate::rnd_scalar;
 
     #[allow(non_snake_case)]
     #[test]

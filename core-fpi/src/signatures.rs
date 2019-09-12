@@ -83,16 +83,20 @@ impl ExtSignature {
     pub fn verify(&self, data: &[Box<[u8]>]) -> bool {
         self.sig.verify(&self.key, &G, data)
     }
+
+    pub fn encoded_key(&self) -> String {
+        bs58::encode(self.key.as_bytes()).into_string()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::rnd_scalar;
+    use crate::rnd_scalar;
 
     #[allow(non_snake_case)]
     #[test]
-    fn test_signature() {
+    fn test_correct() {
         let a = rnd_scalar();
         let Pa = (a * G).compress();
 
@@ -100,5 +104,19 @@ mod tests {
         let sig = ExtSignature::sign(a, Pa, data);
         
         assert!(sig.verify(data) == true);
+    }
+
+
+    #[allow(non_snake_case)]
+    #[test]
+    fn test_incorrect() {
+        let a = rnd_scalar();
+        let Pa = (a * G).compress();
+
+        let data1: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
+        let sig = ExtSignature::sign(a, Pa, data1);
+        
+        let data2: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
+        assert!(sig.verify(data2) == false);
     }
 }
