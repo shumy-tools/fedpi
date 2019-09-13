@@ -96,15 +96,15 @@ impl ExtSignature {
 }
 
 //-----------------------------------------------------------------------------------------------------------
-// Schnorr's signature with key index on the Subject structure
+// Schnorr's signature referencing a key index
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Debug)]
-pub struct SubSignature {
-    pub index: usize,               // Key index on Subject structure
+pub struct IndSignature {
+    pub index: usize,               // Key index
     pub sig: Signature,             // Schnorr's signature
 }
 
-impl SubSignature {
+impl IndSignature {
     #[allow(non_snake_case)]
     pub fn sign(index: usize, s: &Scalar, key: &CompressedRistretto, data: &[&[u8]]) -> Self {
         let sig = Signature::sign(s, key, data);

@@ -3,6 +3,7 @@
 use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::scalar::Scalar;
+
 use rand_os::OsRng;
 
 mod macros;
@@ -22,6 +23,10 @@ pub fn rnd_scalar() -> Scalar {
     Scalar::random(&mut csprng)
 }
 
+pub fn uuid() -> String {
+    let r = rnd_scalar();
+    bs58::encode(r.as_bytes()).into_string()
+}
 
 pub trait KeyEncoder {
     fn encode(&self) -> String;
