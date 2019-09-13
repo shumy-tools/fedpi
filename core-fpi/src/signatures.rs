@@ -16,7 +16,7 @@ pub struct Signature {
 
 impl Signature {
     #[allow(non_snake_case)]
-    pub fn sign(s: &Scalar, P: &CompressedRistretto, data: &[Box<[u8]>]) -> Self {
+    pub fn sign(s: &Scalar, P: &CompressedRistretto, data: &[&[u8]]) -> Self {
         let mut hasher = Sha512::new()
             .chain(s.as_bytes());
         
@@ -41,7 +41,7 @@ impl Signature {
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[Box<[u8]>]) -> bool {
+    pub fn verify(&self, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[&[u8]]) -> bool {
         let Ps = P.decompress();
         if Ps.is_none() {
             return false;
@@ -61,6 +61,11 @@ impl Signature {
 
         c == self.c
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let data: &[&[u8]] = &[self.c.as_bytes(), self.p.as_bytes()];
+        data.concat()
+    }
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -74,18 +79,47 @@ pub struct ExtSignature {
 
 impl ExtSignature {
     #[allow(non_snake_case)]
-    pub fn sign(s: Scalar, P: CompressedRistretto, data: &[Box<[u8]>]) -> Self {
-        let _sig = Signature::sign(&s, &P, data);
+    pub fn sign(s: &Scalar, P: CompressedRistretto, data: &[&[u8]]) -> Self {
+        let _sig = Signature::sign(s, &P, data);
         Self { key: P, sig: _sig }
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, data: &[Box<[u8]>]) -> bool {
+    pub fn verify(&self, data: &[&[u8]]) -> bool {
         self.sig.verify(&self.key, &G, data)
     }
 
-    pub fn encoded_key(&self) -> String {
-        bs58::encode(self.key.as_bytes()).into_string()
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let data: &[&[u8]] = &[self.key.as_bytes(), self.sig.c.as_bytes(), self.sig.p.as_bytes()];
+        data.concat()
+    }
+}
+
+//-----------------------------------------------------------------------------------------------------------
+// Schnorr's signature with key index on the Subject structure
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Debug)]
+pub struct SubSignature {
+    pub index: usize,               // Key index on Subject structure
+    pub sig: Signature,             // Schnorr's signature
+}
+
+impl SubSignature {
+    #[allow(non_snake_case)]
+    pub fn sign(index: usize, s: &Scalar, key: &CompressedRistretto, data: &[&[u8]]) -> Self {
+        let sig = Signature::sign(s, key, data);
+        Self { index: index, sig: sig }
+    }
+
+    #[allow(non_snake_case)]
+    pub fn verify(&self, key: &CompressedRistretto, data: &[&[u8]]) -> bool {
+        self.sig.verify(&key, &G, data)
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let index_bytes = self.index.to_be_bytes();
+        let data: &[&[u8]] = &[&index_bytes, self.sig.c.as_bytes(), self.sig.p.as_bytes()];
+        data.concat()
     }
 }
 
@@ -100,12 +134,14 @@ mod tests {
         let a = rnd_scalar();
         let Pa = (a * G).compress();
 
-        let data: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
-        let sig = ExtSignature::sign(a, Pa, data);
+        let d0 = rnd_scalar();
+        let d1 = rnd_scalar();
+
+        let data: &[&[u8]] = &[d0.as_bytes(), d1.as_bytes()];
+        let sig = ExtSignature::sign(&a, Pa, data);
         
         assert!(sig.verify(data) == true);
     }
-
 
     #[allow(non_snake_case)]
     #[test]
@@ -113,10 +149,14 @@ mod tests {
         let a = rnd_scalar();
         let Pa = (a * G).compress();
 
-        let data1: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
-        let sig = ExtSignature::sign(a, Pa, data1);
+        let d0 = rnd_scalar();
+        let d1 = rnd_scalar();
+        let d2 = rnd_scalar();
         
-        let data2: &[Box<[u8]>] = &[Box::new(rnd_scalar().to_bytes()), Box::new(rnd_scalar().to_bytes())];
+        let data1: &[&[u8]] = &[d0.as_bytes(), d1.as_bytes()];
+        let sig = ExtSignature::sign(&a, Pa, data1);
+        
+        let data2: &[&[u8]] = &[d0.as_bytes(), d2.as_bytes()];
         assert!(sig.verify(data2) == false);
     }
 }

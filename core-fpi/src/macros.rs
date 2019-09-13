@@ -1,6 +1,6 @@
 #![macro_use]
 
-macro_rules! constructors {
+/*macro_rules! constructors {
     ($($var:ident),+ $(; $def:ident)*) => (
         pub fn new<S: Into<String>>($($var: S, )* s: Scalar, key: CompressedRistretto) -> Self {
             $(
@@ -17,4 +17,4 @@ macro_rules! constructors {
             Self { $($var: $var.into(), )* esig: _esig $(, $def: Default::default())* }
         }
     )
-}
+}*/
