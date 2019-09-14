@@ -11,7 +11,7 @@ use crate::{KeyEncoder, ExtSignature, IndSignature};
 #[derive(Debug, Default)]
 pub struct Subject {
     pub sid: String,                                        // Subject ID - <F-ID>:<Name>
-    pub keys: Option<HashMap<usize, SubjectKey>>,           // All subject keys
+    pub keys: HashMap<usize, SubjectKey>,                   // All subject keys
     active: usize,
 
     pub profiles: Option<HashMap<String, Profile>>,
@@ -25,8 +25,7 @@ impl Subject {
 
     pub fn evolve(&mut self, key: SubjectKey) -> &mut Self {
         self.active = key.sig.index;
-        let values = self.keys.get_or_insert(HashMap::new());
-        values.insert(key.sig.index, key);
+        self.keys.insert(key.sig.index, key);
 
         self
     }
@@ -38,55 +37,48 @@ impl Subject {
     }
 
     pub fn active_key(&self) -> Result<&SubjectKey, &'static str> {
-        match &self.keys {
-            None => Err("Subject must have keys!"),
-            Some(keys) => match keys.get(&self.active) {
-                None => Err("Incorrect active key index!"),
-                Some(key) => Ok(key)
-            }
+        match self.keys.get(&self.active) {
+            None => Err("Incorrect active key index!"),
+            Some(key) => Ok(key)
         }
+        
     }
 
     pub fn check_create(&self) -> Result<(), &'static str> {
         // TODO: check "sid" string format
 
-        // check key
-        match &self.keys {
-            None => return Err("Subject must have keys!"),
-            Some(keys) => {
-                if keys.len() != 1 {
-                    return Err("Incorrect number of keys for subject creation!")
+        // check key        
+        if self.keys.len() != 1 {
+            return Err("Incorrect number of keys for subject creation!")
+        }
+
+        // if it reaches here it must have one key with index 0
+        let active_key = match self.keys.get(&0) {
+            None => return Err("Incorrect key index for subject creation!"),
+            Some(key) => {
+                if key.sig.index != 0 {
+                    return Err("Incorrect key index for subject creation!")
                 }
 
-                // if it reaches here it must have one key with index 0
-                let active_key = match keys.get(&0) {
-                    None => return Err("Incorrect key index for subject creation!"),
-                    Some(key) => {
-                        if key.sig.index != 0 {
-                            return Err("Incorrect key index for subject creation!")
-                        }
+                // a self-signed SubjectKey
+                key.check(&self.sid, key)?;
+                key
+            }
+        };
 
-                        // a self-signed SubjectKey
-                        key.check(&self.sid, key)?;
-                        key
+        // check profiles
+        match &self.profiles {
+            None => Ok(()),
+            Some(profiles) => {
+                for (key, item) in profiles.iter() {
+                    if *key != format!("{}@{}", item.typ, item.lurl).to_string() {
+                        return Err("Incorrect subject map-key!")
                     }
-                };
 
-                // check profiles
-                match &self.profiles {
-                    None => Ok(()),
-                    Some(profiles) => {
-                        for (key, item) in profiles.iter() {
-                            if *key != format!("{}@{}", item.typ, item.lurl).to_string() {
-                                return Err("Incorrect subject map-key!")
-                            }
-
-                            item.check(&self.sid, None, active_key)?
-                        }
-
-                        Ok(())
-                    }
+                    item.check(&self.sid, None, active_key)?
                 }
+
+                Ok(())
             }
         }
     }
@@ -348,7 +340,7 @@ mod tests {
             .push(p2)
             .evolve(key);
         
-        println!("ERR: {:?}", subject.check_create());
+        //println!("ERR: {:?}", subject.check_create());
         assert!(subject.check_create() == Ok(()))
     }
 }
