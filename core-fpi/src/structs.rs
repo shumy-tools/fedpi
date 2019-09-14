@@ -81,7 +81,7 @@ impl Subject {
                                 return Err("Incorrect subject map-key!")
                             }
 
-                            item.check_create(&self.sid, active_key)?
+                            item.check(&self.sid, None, active_key)?
                         }
 
                         Ok(())
@@ -174,7 +174,7 @@ pub struct Profile {
     pub lurl: String,                           // Location URL (URL for the profile server)
     sig: Option<IndSignature>,                  // Subject signature for (typ, lurl)
 
-    pub keys: Option<HashMap<String, ProfileKey>>
+    pub keys: HashMap<String, ProfileKey>
 }
 
 impl Profile {
@@ -182,19 +182,18 @@ impl Profile {
         let data = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes()];
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, data);
         
-        Self { typ: typ.into(), lurl: lurl.into(), sig: Some(sig), keys: None }
+        Self { typ: typ.into(), lurl: lurl.into(), sig: Some(sig), keys: HashMap::new() }
     }
 
     pub fn push(&mut self, pkey: ProfileKey) -> &mut Self {
-        let values = self.keys.get_or_insert(HashMap::new());
-        values.insert(pkey.esig.key.encode(), pkey);
+        self.keys.insert(pkey.esig.key.encode(), pkey);
         self
     }
 
-    fn check_create(&self, sid: &str, active_key: &SubjectKey) -> Result<(), &'static str> {
+    /*fn check_create(&self, sid: &str, active_key: &SubjectKey) -> Result<(), &'static str> {
         // TODO: check "typ" and "lurl" string format
 
-        // check new profile
+        // check profile
         match &self.sig {
             None => return Err("Profile creation must have a signature!"),
             Some(sig) => {
@@ -225,6 +224,48 @@ impl Profile {
                 Ok(())
             }
         }
+    }*/
+
+    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
+        // check profile
+        match &self.sig {
+            None => {
+                if current.is_none() {
+                    return Err("Profile creation must have a signature!"); 
+                }
+            },
+            Some(sig) => {
+                if current.is_some() {
+                    return Err("Profile cannot be created, already exists!")
+                }
+
+                // check signature
+                let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
+                if !sig.verify(&active_key.key, data) {
+                    return Err("Invalid profile signature!")
+                }
+            }
+        }
+
+        // check profile keys
+        for (key, item) in self.keys.iter() {
+            if *key != item.esig.key.encode() {
+                return Err("Incorrect profile map-key!")
+            }
+
+            // key already exists?
+            if current.is_none() || current.unwrap().keys.get(key).is_none() {
+                if !item.active {
+                    return Err("New profile-key must be active!")
+                }
+            } else if item.active {
+                return Err("Existing profile-key can only be disabled!")
+            }
+
+            item.check(sid, &self.typ, &self.lurl, active_key)?
+        }
+
+        Ok(())
     }
 }
 
@@ -307,6 +348,7 @@ mod tests {
             .push(p2)
             .evolve(key);
         
+        println!("ERR: {:?}", subject.check_create());
         assert!(subject.check_create() == Ok(()))
     }
 }
