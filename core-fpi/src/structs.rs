@@ -11,10 +11,10 @@ use crate::{KeyEncoder, ExtSignature, IndSignature};
 #[derive(Debug, Default)]
 pub struct Subject {
     pub sid: String,                                        // Subject ID - <F-ID>:<Name>
-    pub keys: HashMap<usize, SubjectKey>,                   // All subject keys
-    active: usize,
+    pub keys: Vec<SubjectKey>,                              // All subject keys
 
     pub profiles: Option<HashMap<String, Profile>>,
+    _phantom: () // force use of constructor
 }
 
 impl Subject {
@@ -23,11 +23,8 @@ impl Subject {
         Self { sid: sid, ..Default::default() }
     }
 
-    pub fn evolve(&mut self, key: SubjectKey) -> &mut Self {
-        self.active = key.sig.index;
-        self.keys.insert(key.sig.index, key);
-
-        self
+    pub fn evolve(&mut self, key: SubjectKey) {
+        self.keys.push(key);
     }
 
     pub fn push(&mut self, profile: Profile) -> &mut Self {
@@ -36,93 +33,87 @@ impl Subject {
         self
     }
 
-    pub fn active_key(&self) -> Result<&SubjectKey, &'static str> {
-        match self.keys.get(&self.active) {
-            None => Err("Incorrect active key index!"),
-            Some(key) => Ok(key)
+    pub fn check(&self, current: Option<&Subject>) -> Result<(), &'static str> {
+        match self.keys.len() {
+            0 => {
+                let current = current.ok_or("Subject update must have a current subject!")?;
+                self.check_update(current)
+            }, 
+            1 => {
+                match current {
+                    None => self.check_create(),
+                    Some(current) => self.check_evolve(current)
+                }
+            }, 
+            _ => Err("Incorrect number of keys for subject sync!")
         }
-        
     }
 
-    pub fn check_create(&self) -> Result<(), &'static str> {
+    fn check_create(&self) -> Result<(), &'static str> {
         // TODO: check "sid" string format
 
-        // check key        
-        if self.keys.len() != 1 {
-            return Err("Incorrect number of keys for subject creation!")
-        }
-
         // if it reaches here it must have one key with index 0
-        let active_key = match self.keys.get(&0) {
-            None => return Err("Incorrect key index for subject creation!"),
-            Some(key) => {
-                if key.sig.index != 0 {
-                    return Err("Incorrect key index for subject creation!")
+        let active_key = self.keys.last().ok_or("Incorrect key index for subject creation!")?;
+        if active_key.sig.index != 0 {
+            return Err("Incorrect key index for subject creation!")
+        }
+
+        // a self-signed SubjectKey
+        active_key.check(&self.sid, active_key)?;
+
+        // check profiles (it's ok if there are no profiles)
+        if let Some(profiles) = &self.profiles {
+            for (key, item) in profiles.iter() {
+                if *key != format!("{}@{}", item.typ, item.lurl).to_string() {
+                    return Err("Incorrect profile map-key!")
                 }
 
-                // a self-signed SubjectKey
-                key.check(&self.sid, key)?;
-                key
-            }
-        };
-
-        // check profiles
-        match &self.profiles {
-            None => Ok(()),
-            Some(profiles) => {
-                for (key, item) in profiles.iter() {
-                    if *key != format!("{}@{}", item.typ, item.lurl).to_string() {
-                        return Err("Incorrect subject map-key!")
-                    }
-
-                    item.check(&self.sid, None, active_key)?
-                }
-
-                Ok(())
+                item.check(&self.sid, None, active_key)?;
             }
         }
+
+        Ok(())
     }
 
-    /*pub fn check_update(&self, current: &Subject) -> Result<(), &'static str> {
+    fn check_evolve(&self, current: &Subject) -> Result<(), &'static str>  {
+        // check the key
+        let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
+        let new_key = self.keys.last().ok_or("No subject-key at expected index!")?;
+        new_key.check(&self.sid, active_key)?;
+
+        if self.profiles.is_some() {
+            return Err("Subject key-evolution cannot have profiles!")
+        }
+
+        Ok(())
+    }
+
+    fn check_update(&self, current: &Subject) -> Result<(), &'static str> {
         if self.sid != current.sid {
-            // is it executes it's a bug in the code
+            // if it executes it's a bug in the code
             return Err("self.sid != update.sid")
         }
 
         // get active key for subject
-        let mut active_key = current.active_key()?;
-
-        // check key evolutions
-        if let Some(keys) = &current.keys {
-            if keys.len() != 1 {
-                return Err("Incorrect number of keys for key-evolution!")
-            }
-
-            // if it reaches here it must have one key (unwrap will always work)
-            let new_key = keys.last().unwrap();
-            if active_key.sig.index + 1 != new_key.sig.index {
-                return Err("Invalid subject-key sequence!")
-            }
-
-            new_key.check(&self.sid, active_key)?;
-            active_key = new_key;
-        }
+        let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
 
         // check profiles
-        match self.profiles {
-            None => Ok(()),
-            Some(profiles) => {
-                // TODO: check for existing profiles? (existing pid or existing (type, lurl))
-                // get current profile from current Subject?
-
-                for item in profiles.iter() {
-                    item.check_update(&self.sid, active_key)?
-                }
-
-                Ok(())
-            }
+        let profiles = self.profiles.as_ref().ok_or("Subject update must have profiles!")?;
+        if profiles.len() == 0 {
+            return Err("Subject update must have at least one profile!")
         }
-    }*/
+
+        let current_profiles = current.profiles.as_ref().ok_or("Current subject must expose profiles!")?;
+        for (key, item) in profiles.iter() {
+            if *key != format!("{}@{}", item.typ, item.lurl).to_string() {
+                return Err("Incorrect profile map-key!")
+            }
+
+            item.check(&self.sid, current_profiles.get(key), active_key)?;
+        }
+
+        Ok(())
+    }
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -182,42 +173,6 @@ impl Profile {
         self
     }
 
-    /*fn check_create(&self, sid: &str, active_key: &SubjectKey) -> Result<(), &'static str> {
-        // TODO: check "typ" and "lurl" string format
-
-        // check profile
-        match &self.sig {
-            None => return Err("Profile creation must have a signature!"),
-            Some(sig) => {
-                // check signature
-                let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
-                if !sig.verify(&active_key.key, data) {
-                    return Err("Invalid profile signature!")
-                }
-            }
-        }
-
-        // check profile keys
-        match &self.keys {
-            None => return Err("Profile creation must have a key!"),
-            Some(keys) => {
-                for (key, item) in keys.iter() {
-                    if *key != item.esig.key.encode() {
-                        return Err("Incorrect profile map-key!")
-                    }
-
-                    if !item.active {
-                        return Err("New profile-keys must be active!")
-                    }
-
-                    item.check(sid, &self.typ, &self.lurl, active_key)?
-                }
-
-                Ok(())
-            }
-        }
-    }*/
-
     fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
         // check profile
         match &self.sig {
@@ -230,6 +185,8 @@ impl Profile {
                 if current.is_some() {
                     return Err("Profile cannot be created, already exists!")
                 }
+
+                // TODO: check "typ" and "lurl" fields?
 
                 // check signature
                 let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
@@ -254,7 +211,7 @@ impl Profile {
                 return Err("Existing profile-key can only be disabled!")
             }
 
-            item.check(sid, &self.typ, &self.lurl, active_key)?
+            item.check(sid, &self.typ, &self.lurl, active_key)?;
         }
 
         Ok(())
