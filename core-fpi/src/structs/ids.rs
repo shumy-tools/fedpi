@@ -5,6 +5,8 @@ use curve25519_dalek::scalar::Scalar;
 
 use crate::crypto::signatures::{ExtSignature, IndSignature};
 
+use crate::FIRST;
+
 //-----------------------------------------------------------------------------------------------------------
 // Subject
 //-----------------------------------------------------------------------------------------------------------
@@ -170,6 +172,7 @@ pub struct Profile {
     _phantom: (), // force use of constructor
 
     // TODO: how to manage replicas without using identity keys?
+    // TODO: how to point to the last Record when evolving ProfileKey
     pub chain: Vec<ProfileKey>
 }
 
@@ -216,14 +219,12 @@ impl Profile {
     }
 
     fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
-        use crate::FIRST;
-
         // check profile
         let mut prev = match &self.sig {
             None => {
                 let current = current.ok_or("Profile cannot be updated, it doesn't exist!")?;
                 let pkey = current.active_key().ok_or("Current profile must have keys!")?;
-                pkey.esig.sig.encoded.as_ref()
+                pkey.id()
             },
             Some(sig) => {
                 if current.is_some() {
@@ -253,7 +254,7 @@ impl Profile {
             }
 
             item.check(sid, &self.typ, &self.lurl, active_key)?;
-            prev = item.esig.sig.encoded.as_ref();
+            prev = item.id();
         }
 
         Ok(())
@@ -272,6 +273,10 @@ pub struct ProfileKey {
 }
 
 impl ProfileKey {
+    pub fn id(&self) -> &String {
+        &self.esig.sig.encoded
+    }
+
     pub fn new(sid: &str, typ: &str, lurl: &str, prev: &str, profile_s: &Scalar, profile_key: CompressedRistretto, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), prev.as_bytes()];
         let esig = ExtSignature::sign(profile_s, profile_key, edata);
@@ -356,10 +361,9 @@ mod tests {
         // -------------------------------------------------
         let p2_key = new1.find_profile("Finance", "https://profile-url.org").unwrap()
             .active_key().unwrap();
-        let p2_prev = &p2_key.esig.sig.encoded;
 
         let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
-        empty_p2.new_profile_key(sid, p2_prev, &sig_s1, &new1.active_key().unwrap());
+        empty_p2.new_profile_key(sid, p2_key.id(), &sig_s1, &new1.active_key().unwrap());
 
         let mut update3 = Subject::new(sid);
         update3.push_profile(empty_p2);
