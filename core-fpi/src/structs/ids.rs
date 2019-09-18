@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
 
-use crate::KeyEncoder;
 use crate::crypto::signatures::{ExtSignature, IndSignature};
 
 //-----------------------------------------------------------------------------------------------------------
@@ -12,10 +11,9 @@ use crate::crypto::signatures::{ExtSignature, IndSignature};
 #[derive(Debug, Default, Clone)]
 pub struct Subject {
     pub sid: String,                                        // Subject ID - <F-ID>:<Name>
-    pub keys: Vec<SubjectKey
-    >,                              // All subject keys
+    pub keys: Vec<SubjectKey>,                              // All subject keys
 
-    pub profiles: Option<HashMap<String, Profile>>,
+    pub profiles: HashMap<String, Profile>,
     _phantom: () // force use of constructor
 }
 
@@ -24,25 +22,21 @@ impl Subject {
         Self { sid: sid.into(), ..Default::default() }
     }
 
-    pub fn active_key(&self) -> Option<&SubjectKey
-    > {
+    pub fn active_key(&self) -> Option<&SubjectKey> {
         self.keys.last()
     }
 
-    pub fn push_key(&mut self, skey: SubjectKey
-    ) {
+    pub fn push_key(&mut self, skey: SubjectKey) {
         self.keys.push(skey);
     }
 
     pub fn find_profile(&self, typ: &str, lurl: &str) -> Option<&Profile> {
         let pid = Profile::pid(typ, lurl);
-        let profiles = self.profiles.as_ref()?;
-        profiles.get(&pid)
+        self.profiles.get(&pid)
     }
 
     pub fn push_profile(&mut self, profile: Profile) -> &mut Self {
-        let values = self.profiles.get_or_insert(HashMap::new());
-        values.insert(profile.id(), profile);
+        self.profiles.insert(profile.id(), profile);
         self
     }
 
@@ -76,12 +70,8 @@ impl Subject {
         active_key.check(&self.sid, active_key)?;
 
         // check profiles (it's ok if there are no profiles)
-        if let Some(profiles) = &self.profiles {
-            let empty_map = HashMap::<String, Profile>::new();
-            return Subject::check_profiles(&self.sid, &profiles, &empty_map, active_key)
-        }
-
-        Ok(())
+        let empty_map = HashMap::<String, Profile>::new();
+        return Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
     }
 
     fn check_evolve(&self, current: &Subject) -> Result<(), &'static str>  {
@@ -95,7 +85,7 @@ impl Subject {
 
         new_key.check(&self.sid, active_key)?;
 
-        if self.profiles.is_some() {
+        if !self.profiles.is_empty() {
             return Err("Subject key-evolution cannot have profiles!")
         }
 
@@ -112,17 +102,14 @@ impl Subject {
         let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
 
         // check profiles
-        let profiles = self.profiles.as_ref().ok_or("Subject update must have profiles!")?;
-        if profiles.len() == 0 {
+        if self.profiles.len() == 0 {
             return Err("Subject update must have at least one profile!")
         }
 
-        let current_profiles = current.profiles.as_ref().ok_or("Current subject must expose profiles!")?;
-        Subject::check_profiles(&self.sid, &profiles, &current_profiles, active_key)
+        Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
     }
 
-    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, active_key: &SubjectKey
-    ) -> Result<(), &'static str> {
+    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
         for (key, item) in profiles.iter() {
             if *key != item.id() {
                 return Err("Incorrect profile map-key!")
@@ -139,15 +126,13 @@ impl Subject {
 // SubjectKey
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Debug, Clone)]
-pub struct SubjectKey
- {
+pub struct SubjectKey {
     pub key: CompressedRistretto,                   // The public key
     pub sig: IndSignature,                          // Signature from the previous key (if exists) for (id, index, key)
     _phantom: () // force use of constructor
 }
 
-impl SubjectKey
- {
+impl SubjectKey {
     pub fn new(id: &str, index: usize, ikey: CompressedRistretto, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Self {
         let index_bytes = index.to_be_bytes();
 
@@ -161,8 +146,7 @@ impl SubjectKey
         Self::new(id, self.sig.index + 1, skey, sig_s, &self.key)
     }
 
-    pub(crate) fn check(&self, id: &str, sig_key: &SubjectKey
-    ) -> Result<(), &'static str> {
+    fn check(&self, id: &str, sig_key: &SubjectKey) -> Result<(), &'static str> {
         let index = self.sig.index;
         let index_bytes = index.to_be_bytes();
 
@@ -186,7 +170,7 @@ pub struct Profile {
     _phantom: (), // force use of constructor
 
     // TODO: how to manage replicas without using identity keys?
-    pub keys: HashMap<String, ProfileKey>
+    pub chain: Vec<ProfileKey>
 }
 
 impl Profile {
@@ -202,41 +186,44 @@ impl Profile {
         Self { typ: typ.into(), lurl: lurl.into(), ..Default::default() }
     }
 
-    pub fn sign(&mut self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey
-    ) {
+    pub fn sign(&mut self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey) {
         let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, data);
 
         self.sig = Some(sig);
     }
 
+    pub fn active_key(&self) -> Option<&ProfileKey> {
+        self.chain.last()
+    }
+
     pub fn push_key(&mut self, pkey: ProfileKey) -> &mut Self {
-        self.keys.insert(pkey.id(), pkey);
+        self.chain.push(pkey);
         self
     }
 
     #[allow(non_snake_case)]
-    pub fn new_profile_key(&mut self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey
-    ) -> Scalar {
+    pub fn new_profile_key(&mut self, sid: &str, prev: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> Scalar {
         use crate::{G, rnd_scalar};
 
         let secret = rnd_scalar();
         let P = (secret * G).compress();
 
-        let pkey = ProfileKey::new(true, sid, &self.typ, &self.lurl, &secret, P, sig_s, sig_key);
-        self.keys.insert(pkey.id(), pkey);
+        let pkey = ProfileKey::new(sid, &self.typ, &self.lurl, prev, &secret, P, sig_s, sig_key);
+        self.chain.push(pkey);
         
         secret
     }
 
-    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey
-    ) -> Result<(), &'static str> {
+    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
+        use crate::FIRST;
+
         // check profile
-        match &self.sig {
+        let mut prev = match &self.sig {
             None => {
-                if current.is_none() {
-                    return Err("Profile cannot be updated, it doesn't exist!"); 
-                }
+                let current = current.ok_or("Profile cannot be updated, it doesn't exist!")?;
+                let pkey = current.active_key().ok_or("Current profile must have keys!")?;
+                pkey.esig.sig.encoded.as_ref()
             },
             Some(sig) => {
                 if current.is_some() {
@@ -250,29 +237,23 @@ impl Profile {
                 if !sig.verify(&active_key.key, data) {
                     return Err("Invalid profile signature!")
                 }
+
+                FIRST
             }
-        }
+        };
 
         // check profile keys
-        if self.keys.is_empty() {
+        if self.chain.is_empty() {
             return Err("Profile must have keys!")
         }
 
-        for (key, item) in self.keys.iter() {
-            if *key != item.id() {
-                return Err("Incorrect profile map-key!")
-            }
-
-            // key already exists?
-            if current.is_none() || current.unwrap().keys.get(key).is_none() {
-                if !item.active {
-                    return Err("New profile-key must be active!")
-                }
-            } else if item.active {
-                return Err("Existing profile-key can only be disabled!")
+        for item in self.chain.iter() {
+            if *prev != item.prev  {
+                return Err("ProfileKey is not correcly chained!")
             }
 
             item.check(sid, &self.typ, &self.lurl, active_key)?;
+            prev = item.esig.sig.encoded.as_ref();
         }
 
         Ok(())
@@ -284,39 +265,30 @@ impl Profile {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Debug, Clone)]
 pub struct ProfileKey {
-    pub active: bool,                       // Is being used?
+    pub prev: String,                       // Previous key signature
     pub esig: ExtSignature,                 // Extended Schnorr's signature for (active, sid, pid) to register the profile key
     pub sig: IndSignature,                  // Subject signature for (active, sid, typ, lurl, esig)
     _phantom: () // force use of constructor
 }
 
 impl ProfileKey {
-    pub fn id(&self) -> String {
-        self.esig.key.encode()
-    }
-
-    pub fn new(active: bool, sid: &str, typ: &str, lurl: &str, profile_s: &Scalar, profile_key: CompressedRistretto, sig_s: &Scalar, sig_key: &SubjectKey
-    ) -> Self {
-        let active_bytes = if active { &[1u8] } else { &[0u8] };
-
-        let edata = &[active_bytes, sid.as_bytes(), typ.as_bytes(), lurl.as_bytes()];
+    pub fn new(sid: &str, typ: &str, lurl: &str, prev: &str, profile_s: &Scalar, profile_key: CompressedRistretto, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), prev.as_bytes()];
         let esig = ExtSignature::sign(profile_s, profile_key, edata);
         
-        let data = &[edata[0], edata[1], edata[2], edata[3], esig.sig.encoded.as_bytes()];
+        let data = &[esig.sig.encoded.as_bytes()];
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, data);
         
-        Self { active: active, esig: esig, sig: sig, _phantom: () }
+        Self { prev: prev.into(), esig: esig, sig: sig, _phantom: () }
     }
 
-    pub fn check(&self, sid: &str, typ: &str, lurl: &str, active_key: &SubjectKey
-    ) -> Result<(), &'static str> {
-        let active_bytes = if self.active { &[1u8] } else { &[0u8] };
-        let edata = &[active_bytes, sid.as_bytes(), typ.as_bytes(), lurl.as_bytes()];
+    pub fn check(&self, sid: &str, typ: &str, lurl: &str, active_key: &SubjectKey) -> Result<(), &'static str> {
+        let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), self.prev.as_bytes()];
         if !self.esig.verify(edata) {
             return Err("Invalid profile-key ext-signature!")
         }
 
-        let data = &[edata[0], edata[1], edata[2], edata[3], &self.esig.sig.encoded.as_bytes()];
+        let data = &[self.esig.sig.encoded.as_bytes()];
         if !self.sig.verify(&active_key.key, data) {
             return Err("Invalid profile-key signature!")
         }
@@ -329,7 +301,7 @@ impl ProfileKey {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{G, rnd_scalar};
+    use crate::{G, FIRST, rnd_scalar};
 
     #[allow(non_snake_case)]
     #[test]
@@ -341,16 +313,15 @@ mod tests {
         let sig_key1 = (sig_s1 * G).compress();
         
         let sid = "s-id:shumy";
-        let skey1 = SubjectKey
-        ::new(sid, 0, sig_key1, &sig_s1, &sig_key1);
+        let skey1 = SubjectKey::new(sid, 0, sig_key1, &sig_s1, &sig_key1);
         
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
         p1.sign(sid, &sig_s1, &skey1);
-        p1.new_profile_key(sid, &sig_s1, &skey1);
+        p1.new_profile_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut p2 = Profile::new("Finance", "https://profile-url.org");
         p2.sign(sid, &sig_s1, &skey1);
-        p2.new_profile_key(sid, &sig_s1, &skey1);
+        p2.new_profile_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut new1 = Subject::new(sid);
         new1
@@ -361,7 +332,6 @@ mod tests {
 
         //--------------------------------------------------
         // Evolving SubjectKey
-
         // -------------------------------------------------
         let sig_key2 = (rnd_scalar() * G).compress();
         let skey2 = new1.active_key().unwrap().evolve(sid, sig_key2, &sig_s1);
@@ -375,7 +345,7 @@ mod tests {
         // -------------------------------------------------
         let mut p3 = Profile::new("HealthCare", "https://profile-url.org");
         p3.sign(sid, &sig_s1, &new1.active_key().unwrap());
-        p3.new_profile_key(sid, &sig_s1, &new1.active_key().unwrap());
+        p3.new_profile_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
 
         let mut update2 = Subject::new(sid);
         update2.push_profile(p3);
@@ -384,8 +354,12 @@ mod tests {
         //--------------------------------------------------
         // Updating ProfileKey
         // -------------------------------------------------
+        let p2_key = new1.find_profile("Finance", "https://profile-url.org").unwrap()
+            .active_key().unwrap();
+        let p2_prev = &p2_key.esig.sig.encoded;
+
         let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
-        empty_p2.new_profile_key(sid, &sig_s1, &new1.active_key().unwrap());
+        empty_p2.new_profile_key(sid, p2_prev, &sig_s1, &new1.active_key().unwrap());
 
         let mut update3 = Subject::new(sid);
         update3.push_profile(empty_p2);
@@ -406,7 +380,7 @@ mod tests {
         
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
         p1.sign(sid, &sig_s1, &skey1);
-        let s1 = p1.new_profile_key(sid, &sig_s1, &skey1);
+        let s1 = p1.new_profile_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut new1 = Subject::new(sid);
         new1
@@ -429,7 +403,6 @@ mod tests {
 
         //--------------------------------------------------
         // Evolving SubjectKey
-
         // -------------------------------------------------
         let sig_s2 = rnd_scalar();
         let sig_key2 = (sig_s2 * G).compress();
@@ -453,7 +426,7 @@ mod tests {
         // -------------------------------------------------
         let mut p2 = Profile::new("Assets", "https://profile-url.org");
         p2.sign(sid, &sig_s1, &new1.active_key().unwrap());
-        p2.new_profile_key(sid, &sig_s1, &new1.active_key().unwrap());
+        p2.new_profile_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
 
         let mut update1 = Subject::new(sid);
         update1.push_profile(p2);
@@ -463,12 +436,12 @@ mod tests {
         // Updating ProfileKey
         // -------------------------------------------------
         let mut empty_p2 = Profile::new("Assets", "https://profile-url.org");
-        let p2_key = ProfileKey::new(true, sid, "Assets", "https://profile-url.org", &s1, (s1 * G).compress(), &sig_s1, &new1.active_key().unwrap());
+        let p2_key = ProfileKey::new(sid, "Assets", "https://profile-url.org", FIRST, &s1, (s1 * G).compress(), &sig_s1, &new1.active_key().unwrap());
         empty_p2.push_key(p2_key);
 
         let mut update2 = Subject::new(sid);
         update2.push_profile(empty_p2);
-        assert!(update2.check(Some(&new1)) == Err("Existing profile-key can only be disabled!"));
+        assert!(update2.check(Some(&new1)) == Err("ProfileKey is not correcly chained!"));
 
     }
 }

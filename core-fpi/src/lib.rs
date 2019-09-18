@@ -15,6 +15,7 @@ pub use crate::crypto::*;
 pub use crate::structs::*;
 
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
+pub const FIRST: &str = "F";
 
 pub fn rnd_scalar() -> Scalar {
     let mut csprng: OsRng = OsRng::new().unwrap();
