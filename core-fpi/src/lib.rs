@@ -7,13 +7,11 @@ use curve25519_dalek::scalar::Scalar;
 use rand_os::OsRng;
 
 mod macros;
-mod shares;
-mod signatures;
+mod crypto;
 mod structs;
 
 // -- Exported --
-pub use crate::shares::*;
-pub use crate::signatures::*;
+pub use crate::crypto::*;
 pub use crate::structs::*;
 
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;

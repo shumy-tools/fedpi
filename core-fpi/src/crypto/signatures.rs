@@ -8,15 +8,17 @@ use crate::G;
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct Signature {
+    pub encoded: String,
+
     pub c: Scalar,
     pub p: Scalar
 }
 
 impl Signature {
     #[allow(non_snake_case)]
-    pub fn sign(s: &Scalar, P: &CompressedRistretto, data: &[&[u8]]) -> Self {
+    pub fn sign(s: &Scalar, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[&[u8]]) -> Self {
         let mut hasher = Sha512::new()
             .chain(s.as_bytes());
         
@@ -25,7 +27,7 @@ impl Signature {
         }
 
         let m = Scalar::from_hash(hasher); 
-        let M = (m * G).compress();
+        let M = (m * BasePoint).compress();
 
         let mut hasher = Sha512::new()
             .chain(P.as_bytes())
@@ -35,9 +37,14 @@ impl Signature {
             hasher.input(d);
         }
 
-        let _c = Scalar::from_hash(hasher);
+        let c = Scalar::from_hash(hasher);
+        let p = m - c * s;
 
-        Self { c: _c, p: m - _c * s }
+        let data: &[&[u8]] = &[c.as_bytes(), p.as_bytes()];
+        let data = data.concat();
+        let as_string = bs58::encode(&data).into_string();
+
+        Self { encoded: as_string, c: c, p: m - c * s }
     }
 
     #[allow(non_snake_case)]
@@ -62,26 +69,25 @@ impl Signature {
         c == self.c
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let data: &[&[u8]] = &[self.c.as_bytes(), self.p.as_bytes()];
-        data.concat()
-    }
+    /*pub fn decode(value: &str) -> Result<Signature, &'static str> {
+        let decoded = bs58::decode(value).into_vec().map_err(|_| "Invalid base58 signature string!")?;
+    }*/
 }
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature with PublicKey (Extended Signature)
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct ExtSignature {
-    pub key: CompressedRistretto,
-    pub sig: Signature
+    pub sig: Signature,
+    pub key: CompressedRistretto
 }
 
 impl ExtSignature {
     #[allow(non_snake_case)]
-    pub fn sign(s: &Scalar, P: CompressedRistretto, data: &[&[u8]]) -> Self {
-        let _sig = Signature::sign(s, &P, data);
-        Self { key: P, sig: _sig }
+    pub fn sign(s: &Scalar, key: CompressedRistretto, data: &[&[u8]]) -> Self {
+        let sig = Signature::sign(s, &key, &G, data);
+        Self {  sig: sig, key: key }
     }
 
     #[allow(non_snake_case)]
@@ -89,25 +95,24 @@ impl ExtSignature {
         self.sig.verify(&self.key, &G, data)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /*pub fn to_bytes(&self) -> Vec<u8> {
         let data: &[&[u8]] = &[self.key.as_bytes(), self.sig.c.as_bytes(), self.sig.p.as_bytes()];
         data.concat()
-    }
+    }*/
 }
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature referencing a key index
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndSignature {
     pub index: usize,               // Key index
     pub sig: Signature,             // Schnorr's signature
 }
 
 impl IndSignature {
-    #[allow(non_snake_case)]
     pub fn sign(index: usize, s: &Scalar, key: &CompressedRistretto, data: &[&[u8]]) -> Self {
-        let sig = Signature::sign(s, key, data);
+        let sig = Signature::sign(s, key, &G, data);
         Self { index: index, sig: sig }
     }
 
@@ -116,11 +121,11 @@ impl IndSignature {
         self.sig.verify(&key, &G, data)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /*pub fn to_bytes(&self) -> Vec<u8> {
         let index_bytes = self.index.to_be_bytes();
         let data: &[&[u8]] = &[&index_bytes, self.sig.c.as_bytes(), self.sig.p.as_bytes()];
         data.concat()
-    }
+    }*/
 }
 
 #[cfg(test)]
