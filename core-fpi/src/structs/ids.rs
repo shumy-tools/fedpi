@@ -4,8 +4,7 @@ use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
 
 use crate::crypto::signatures::{ExtSignature, IndSignature};
-
-use crate::FIRST;
+use crate::{FIRST, Result};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
@@ -42,7 +41,7 @@ impl Subject {
         self
     }
 
-    pub fn check(&self, current: Option<&Subject>) -> Result<(), &'static str> {
+    pub fn check(&self, current: Option<&Subject>) -> Result<()> {
         match self.keys.len() {
             0 => {
                 let current = current.ok_or("Subject update must have a current subject!")?;
@@ -58,7 +57,7 @@ impl Subject {
         }
     }
 
-    fn check_create(&self) -> Result<(), &'static str> {
+    fn check_create(&self) -> Result<()> {
         // TODO: check "sid" string format
 
         // if it reaches here it must have one key with index 0
@@ -76,7 +75,7 @@ impl Subject {
         return Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
     }
 
-    fn check_evolve(&self, current: &Subject) -> Result<(), &'static str>  {
+    fn check_evolve(&self, current: &Subject) -> Result<()>  {
         // check the key
         let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
         let new_key = self.keys.last().ok_or("No subject-key at expected index!")?;
@@ -94,7 +93,7 @@ impl Subject {
         Ok(())
     }
 
-    fn check_update(&self, current: &Subject) -> Result<(), &'static str> {
+    fn check_update(&self, current: &Subject) -> Result<()> {
         if self.sid != current.sid {
             // if it executes it's a bug in the code
             return Err("self.sid != update.sid")
@@ -111,7 +110,7 @@ impl Subject {
         Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
     }
 
-    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
+    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, active_key: &SubjectKey) -> Result<()> {
         for (key, item) in profiles.iter() {
             if *key != item.id() {
                 return Err("Incorrect profile map-key!")
@@ -148,7 +147,7 @@ impl SubjectKey {
         Self::new(id, self.sig.index + 1, skey, sig_s, &self.key)
     }
 
-    fn check(&self, id: &str, sig_key: &SubjectKey) -> Result<(), &'static str> {
+    fn check(&self, id: &str, sig_key: &SubjectKey) -> Result<()> {
         let index = self.sig.index;
         let index_bytes = index.to_be_bytes();
 
@@ -168,7 +167,6 @@ impl SubjectKey {
 pub struct Profile {
     pub typ: String,                            // Profile Type ex: HealthCare, Financial, Assets, etc
     pub lurl: String,                           // Location URL (URL for the profile server)
-    pub sig: Option<IndSignature>,              // Subject signature for (typ, lurl)
     _phantom: (), // force use of constructor
 
     // TODO: how to manage replicas without using identity keys?
@@ -189,24 +187,12 @@ impl Profile {
         Self { typ: typ.into(), lurl: lurl.into(), ..Default::default() }
     }
 
-    pub fn sign(&mut self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey) {
-        let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
-        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, data);
-
-        self.sig = Some(sig);
-    }
-
     pub fn active_key(&self) -> Option<&ProfileKey> {
         self.chain.last()
     }
 
-    pub fn push_key(&mut self, pkey: ProfileKey) -> &mut Self {
-        self.chain.push(pkey);
-        self
-    }
-
     #[allow(non_snake_case)]
-    pub fn new_profile_key(&mut self, sid: &str, prev: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> Scalar {
+    pub fn new_key(&mut self, sid: &str, prev: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> Scalar {
         use crate::{G, rnd_scalar};
 
         let secret = rnd_scalar();
@@ -218,28 +204,16 @@ impl Profile {
         secret
     }
 
-    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<(), &'static str> {
+    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<()> {
         // check profile
-        let mut prev = match &self.sig {
+        let mut prev = match current {
             None => {
-                let current = current.ok_or("Profile cannot be updated, it doesn't exist!")?;
+                // TODO: check "typ" and "lurl" fields?
+                FIRST
+            },
+            Some(current) => {
                 let pkey = current.active_key().ok_or("Current profile must have keys!")?;
                 pkey.id()
-            },
-            Some(sig) => {
-                if current.is_some() {
-                    return Err("Profile cannot be created, already exist!")
-                }
-
-                // TODO: check "typ" and "lurl" fields?
-
-                // check signature
-                let data = &[sid.as_bytes(), self.typ.as_bytes(), self.lurl.as_bytes()];
-                if !sig.verify(&active_key.key, data) {
-                    return Err("Invalid profile signature!")
-                }
-
-                FIRST
             }
         };
 
@@ -287,7 +261,7 @@ impl ProfileKey {
         Self { prev: prev.into(), esig: esig, sig: sig, _phantom: () }
     }
 
-    pub fn check(&self, sid: &str, typ: &str, lurl: &str, active_key: &SubjectKey) -> Result<(), &'static str> {
+    pub fn check(&self, sid: &str, typ: &str, lurl: &str, active_key: &SubjectKey) -> Result<()> {
         let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), self.prev.as_bytes()];
         if !self.esig.verify(edata) {
             return Err("Invalid profile-key ext-signature!")
@@ -321,12 +295,10 @@ mod tests {
         let skey1 = SubjectKey::new(sid, 0, sig_key1, &sig_s1, &sig_key1);
         
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.sign(sid, &sig_s1, &skey1);
-        p1.new_profile_key(sid, FIRST, &sig_s1, &skey1);
+        p1.new_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut p2 = Profile::new("Finance", "https://profile-url.org");
-        p2.sign(sid, &sig_s1, &skey1);
-        p2.new_profile_key(sid, FIRST, &sig_s1, &skey1);
+        p2.new_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut new1 = Subject::new(sid);
         new1
@@ -349,8 +321,7 @@ mod tests {
         // Updating Profile
         // -------------------------------------------------
         let mut p3 = Profile::new("HealthCare", "https://profile-url.org");
-        p3.sign(sid, &sig_s1, &new1.active_key().unwrap());
-        p3.new_profile_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
+        p3.new_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
 
         let mut update2 = Subject::new(sid);
         update2.push_profile(p3);
@@ -363,7 +334,7 @@ mod tests {
             .active_key().unwrap();
 
         let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
-        empty_p2.new_profile_key(sid, p2_key.id(), &sig_s1, &new1.active_key().unwrap());
+        empty_p2.new_key(sid, p2_key.id(), &sig_s1, &new1.active_key().unwrap());
 
         let mut update3 = Subject::new(sid);
         update3.push_profile(empty_p2);
@@ -379,12 +350,10 @@ mod tests {
         let sig_key1 = (sig_s1 * G).compress();
         let sid = "s-id:shumy";
 
-        let skey1 = SubjectKey
-        ::new(sid, 0, sig_key1, &sig_s1, &sig_key1);
+        let skey1 = SubjectKey::new(sid, 0, sig_key1, &sig_s1, &sig_key1);
         
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.sign(sid, &sig_s1, &skey1);
-        let s1 = p1.new_profile_key(sid, FIRST, &sig_s1, &skey1);
+        p1.new_key(sid, FIRST, &sig_s1, &skey1);
 
         let mut new1 = Subject::new(sid);
         new1
@@ -399,8 +368,7 @@ mod tests {
         assert!(incorrect.check(None) == Err("Subject update must have a current subject!"));
 
         let mut incorrect = Subject::new(sid);
-        let skey1 = SubjectKey
-        ::new(sid, 1, sig_key1, &sig_s1, &sig_key1);
+        let skey1 = SubjectKey::new(sid, 1, sig_key1, &sig_s1, &sig_key1);
 
         incorrect.push_key(skey1);
         assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!"));
@@ -412,10 +380,8 @@ mod tests {
         let sig_key2 = (sig_s2 * G).compress();
 
         // try to evolve with wrong index and self-signed!
-        let skey2 = SubjectKey
-        ::new(sid, 0, sig_key2, &sig_s1, &sig_key1);
-        let skey3 = SubjectKey
-        ::new(sid, 1, sig_key2, &sig_s2, &sig_key2);
+        let skey2 = SubjectKey::new(sid, 0, sig_key2, &sig_s1, &sig_key1);
+        let skey3 = SubjectKey::new(sid, 1, sig_key2, &sig_s2, &sig_key2);
 
         let mut incorrect = Subject::new(sid);
         incorrect.push_key(skey2);
@@ -429,23 +395,11 @@ mod tests {
         // Updating Profile
         // -------------------------------------------------
         let mut p2 = Profile::new("Assets", "https://profile-url.org");
-        p2.sign(sid, &sig_s1, &new1.active_key().unwrap());
-        p2.new_profile_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
+        p2.new_key(sid, FIRST, &sig_s1, &new1.active_key().unwrap());
 
         let mut update1 = Subject::new(sid);
         update1.push_profile(p2);
-        assert!(update1.check(Some(&new1)) == Err("Profile cannot be created, already exist!"));
-
-        //--------------------------------------------------
-        // Updating ProfileKey
-        // -------------------------------------------------
-        let mut empty_p2 = Profile::new("Assets", "https://profile-url.org");
-        let p2_key = ProfileKey::new(sid, "Assets", "https://profile-url.org", FIRST, &s1, (s1 * G).compress(), &sig_s1, &new1.active_key().unwrap());
-        empty_p2.push_key(p2_key);
-
-        let mut update2 = Subject::new(sid);
-        update2.push_profile(empty_p2);
-        assert!(update2.check(Some(&new1)) == Err("ProfileKey is not correcly chained!"));
+        assert!(update1.check(Some(&new1)) == Err("ProfileKey is not correcly chained!"));
 
     }
 }
