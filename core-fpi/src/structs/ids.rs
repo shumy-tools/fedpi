@@ -261,7 +261,7 @@ impl ProfileKey {
         Self { prev: prev.into(), esig: esig, sig: sig, _phantom: () }
     }
 
-    pub fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
+    fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
         let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), self.prev.as_bytes()];
         if !self.esig.verify(edata) {
             return Err("Invalid profile-key ext-signature!")

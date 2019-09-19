@@ -5,6 +5,16 @@ use crate::crypto::signatures::Signature;
 use crate::{FIRST, Result};
 
 //-----------------------------------------------------------------------------------------------------------
+// Create record transaction
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Debug, Clone)]
+pub struct CreateRecord {
+    pub record: Record,
+    pub key: CompressedRistretto,
+    pub base: CompressedRistretto,
+}
+
+//-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Debug, Clone)]
