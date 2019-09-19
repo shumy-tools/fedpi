@@ -15,7 +15,9 @@ pub use crate::crypto::*;
 pub use crate::structs::*;
 
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
-pub const FIRST: &str = "F";
+
+pub const FIRST: &str = "FIRST";
+pub const LAST: &str = "LAST";
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 

@@ -10,7 +10,7 @@ use crate::{FIRST, Result};
 #[derive(Debug, Clone)]
 pub struct Record {
     pub prev: String,
-    pub data: Vec<u8>,
+    pub data: Vec<u8>,                      // TODO: data fields may release some info connection different streams!
     pub sig: Signature,
     _phantom: () // force use of constructor
 }

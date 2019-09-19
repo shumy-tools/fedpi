@@ -42,21 +42,19 @@ impl Subject {
     }
 
     pub fn check(&self, current: Option<&Subject>) -> Result<()> {
-        match self.keys.len() {
-            0 => {
-                let current = current.ok_or("Subject update must have a current subject!")?;
-                self.check_update(current)
-            }, 
-            1 => {
-                match current {
-                    None => self.check_create(),
-                    Some(current) => self.check_evolve(current)
+        match current {
+            None => self.check_create(),
+            Some(current) => {
+                match self.keys.len() {
+                    0 => self.check_update(current),
+                    1 => self.check_evolve(current),
+                    _ => Err("Incorrect number of keys for subject sync!")
                 }
-            }, 
-            _ => Err("Incorrect number of keys for subject sync!")
+            }
         }
     }
 
+    // TODO: should be replaced by check_full with proper changes (verify key chain and select correct SubjectKey for profile)
     fn check_create(&self) -> Result<()> {
         // TODO: check "sid" string format
 
@@ -67,7 +65,6 @@ impl Subject {
         }
 
         // a self-signed SubjectKey
-
         active_key.check(&self.sid, active_key)?;
 
         // check profiles (it's ok if there are no profiles)
@@ -110,13 +107,13 @@ impl Subject {
         Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
     }
 
-    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, active_key: &SubjectKey) -> Result<()> {
+    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
         for (key, item) in profiles.iter() {
             if *key != item.id() {
                 return Err("Incorrect profile map-key!")
             }
 
-            item.check(sid, current.get(key), active_key)?;
+            item.check(sid, current.get(key), sig_key)?;
         }
 
         Ok(())
@@ -169,8 +166,11 @@ pub struct Profile {
     pub lurl: String,                           // Location URL (URL for the profile server)
     _phantom: (), // force use of constructor
 
+    /* TODO: how to point to the last Record when evolving a ProfileKey
+       - Sign the evolution with the same B=("Close") for the record, derive (MPC) m x Y -> My. Use My to find the record where c=H(PI||My||B)
+    */
+
     // TODO: how to manage replicas without using identity keys?
-    // TODO: how to point to the last Record when evolving ProfileKey
     pub chain: Vec<ProfileKey>
 }
 
@@ -204,7 +204,7 @@ impl Profile {
         secret
     }
 
-    fn check(&self, sid: &str, current: Option<&Profile>, active_key: &SubjectKey) -> Result<()> {
+    fn check(&self, sid: &str, current: Option<&Profile>, sig_key: &SubjectKey) -> Result<()> {
         // check profile
         let mut prev = match current {
             None => {
@@ -227,7 +227,7 @@ impl Profile {
                 return Err("ProfileKey is not correcly chained!")
             }
 
-            item.check(sid, &self.typ, &self.lurl, active_key)?;
+            item.check(sid, &self.typ, &self.lurl, sig_key)?;
             prev = item.id();
         }
 
@@ -261,14 +261,14 @@ impl ProfileKey {
         Self { prev: prev.into(), esig: esig, sig: sig, _phantom: () }
     }
 
-    pub fn check(&self, sid: &str, typ: &str, lurl: &str, active_key: &SubjectKey) -> Result<()> {
+    pub fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
         let edata = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), self.prev.as_bytes()];
         if !self.esig.verify(edata) {
             return Err("Invalid profile-key ext-signature!")
         }
 
         let data = &[self.esig.sig.encoded.as_bytes()];
-        if !self.sig.verify(&active_key.key, data) {
+        if !self.sig.verify(&sig_key.key, data) {
             return Err("Invalid profile-key signature!")
         }
 
@@ -365,7 +365,7 @@ mod tests {
         // Creating Subject
         // -------------------------------------------------
         let incorrect = Subject::new(sid);
-        assert!(incorrect.check(None) == Err("Subject update must have a current subject!"));
+        assert!(incorrect.check(None) == Err("No key found for subject creation!"));
 
         let mut incorrect = Subject::new(sid);
         let skey1 = SubjectKey::new(sid, 1, sig_key1, &sig_s1, &sig_key1);
