@@ -1,21 +1,34 @@
+use std::fmt::{Debug, Formatter};
 use std::collections::HashMap;
+
+use serde::{Serialize, Deserialize};
 
 use curve25519_dalek::ristretto::CompressedRistretto;
 use curve25519_dalek::scalar::Scalar;
 
 use crate::crypto::signatures::{ExtSignature, IndSignature};
-use crate::{FIRST, Result};
+use crate::{FIRST, Result, KeyEncoder};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Subject {
     pub sid: String,                                        // Subject ID - <F-ID>:<Name>
     pub keys: Vec<SubjectKey>,                              // All subject keys
 
     pub profiles: HashMap<String, Profile>,
-    _phantom: () // force use of constructor
+    #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl Debug for Subject {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("Subject")
+            .field("sid", &self.sid)
+            .field("keys", &self.keys)
+            .field("profiles", &self.profiles)
+            .finish()
+    }
 }
 
 impl Subject {
@@ -123,11 +136,20 @@ impl Subject {
 //-----------------------------------------------------------------------------------------------------------
 // SubjectKey
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SubjectKey {
     pub key: CompressedRistretto,                   // The public key
     pub sig: IndSignature,                          // Signature from the previous key (if exists) for (id, index, key)
-    _phantom: () // force use of constructor
+    #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl Debug for SubjectKey {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("SubjectKey")
+            .field("key", &self.key.encode())
+            .field("sig", &self.sig)
+            .finish()
+    }
 }
 
 impl SubjectKey {
@@ -160,11 +182,11 @@ impl SubjectKey {
 //-----------------------------------------------------------------------------------------------------------
 // Profile
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Profile {
     pub typ: String,                            // Profile Type ex: HealthCare, Financial, Assets, etc
     pub lurl: String,                           // Location URL (URL for the profile server)
-    _phantom: (), // force use of constructor
+    #[serde(skip)] _phantom: (), // force use of constructor
 
     /* TODO: how to point to the last Record when evolving a ProfileKey
        - Sign the evolution with the same B=("Close") for the record, derive (MPC) m x Y -> My. Use My to find the record where c=H(PI||My||B)
@@ -172,6 +194,15 @@ pub struct Profile {
 
     // TODO: how to manage replicas without using identity keys?
     pub chain: Vec<ProfileKey>
+}
+
+impl Debug for Profile {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("Profile")
+            .field("typ", &self.typ)
+            .field("lurl", &self.lurl)
+            .finish()
+    }
 }
 
 impl Profile {
@@ -238,12 +269,22 @@ impl Profile {
 //-----------------------------------------------------------------------------------------------------------
 // ProfileKey
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProfileKey {
     pub prev: String,                       // Previous key signature
     pub esig: ExtSignature,                 // Extended Schnorr's signature for (active, sid, pid) to register the profile key
     pub sig: IndSignature,                  // Subject signature for (active, sid, typ, lurl, esig)
-    _phantom: () // force use of constructor
+    #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl Debug for ProfileKey {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("ProfileKey")
+            .field("prev", &self.prev)
+            .field("esig", &self.esig)
+            .field("sig", &self.sig)
+            .finish()
+    }
 }
 
 impl ProfileKey {

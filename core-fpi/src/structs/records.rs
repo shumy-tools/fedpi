@@ -1,3 +1,5 @@
+use serde::{Serialize, Deserialize};
+
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 
@@ -5,19 +7,9 @@ use crate::crypto::signatures::Signature;
 use crate::{FIRST, Result};
 
 //-----------------------------------------------------------------------------------------------------------
-// Create record transaction
-//-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
-pub struct CreateRecord {
-    pub record: Record,
-    pub key: CompressedRistretto,
-    pub base: CompressedRistretto,
-}
-
-//-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Record {
     pub prev: String,
     pub data: Vec<u8>,                      // TODO: data fields may release some info connection different streams!

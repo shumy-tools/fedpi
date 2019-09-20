@@ -1,19 +1,64 @@
+use std::fmt::{Debug, Formatter};
+
+use serde::{Serialize, Deserialize};
+use serde::ser::Serializer;
+use serde::de::{Deserializer, Error};
+
 use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 use curve25519_dalek::scalar::Scalar;
 
 use sha2::{Sha512, Digest};
 
-use crate::G;
+use crate::{G, KeyEncoder};
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Signature {
     pub encoded: String,
 
     pub c: Scalar,
     pub p: Scalar
+}
+
+impl Debug for Signature {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.write_str(&self.encoded)
+    }
+}
+
+impl Serialize for Signature {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+        self.encoded.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Signature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        let as_string = String::deserialize(deserializer)?;
+        let data = bs58::decode(&as_string).into_vec()
+            .map_err(|_| Error::custom("Invalid base58 signature string!"))?;
+        
+        if data.len() != 64 {
+            return Err(Error::custom("Incorrect signature lenght!"))
+        }
+
+        let mut c_bytes: [u8; 32] = Default::default();
+        c_bytes.copy_from_slice(&data[0..32]);
+
+        let mut p_bytes: [u8; 32] = Default::default();
+        p_bytes.copy_from_slice(&data[32..64]);
+
+        let c_scalar = Scalar::from_canonical_bytes(c_bytes)
+            .ok_or(Error::custom("Invalid c scalar!"))?;
+        
+        let p_scalar = Scalar::from_canonical_bytes(p_bytes)
+            .ok_or(Error::custom("Invalid p scalar!"))?;
+
+        let obj = Signature { encoded: as_string, c: c_scalar, p: p_scalar };
+        Ok(obj)
+    }
 }
 
 impl Signature {
@@ -77,10 +122,19 @@ impl Signature {
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature with PublicKey (Extended Signature)
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ExtSignature {
     pub sig: Signature,
     pub key: CompressedRistretto
+}
+
+impl Debug for ExtSignature {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("ExtSignature")
+            .field("sig", &self.sig)
+            .field("key", &self.key.encode())
+            .finish()
+    }
 }
 
 impl ExtSignature {
@@ -104,7 +158,7 @@ impl ExtSignature {
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature referencing a key index
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IndSignature {
     pub index: usize,               // Key index
     pub sig: Signature,             // Schnorr's signature

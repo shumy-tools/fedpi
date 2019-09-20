@@ -8,9 +8,12 @@ use env_logger::fmt::Color;
 use log::Level::{Info, Warn, Error};
 use log::{info, LevelFilter};
 
+mod processor;
+mod tendermint;
+
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-mod tendermint;
+pub type Result<T> = std::result::Result<T, &'static str>;
 
 fn main() {
     let matches = App::new("FedPI Node")
@@ -59,7 +62,10 @@ fn main() {
         .filter(None, LevelFilter::Info)
         .init();
 
-    // default to tendermint...
-    info!("Initializing FedPI Node at port: {}", port);
-    abci::run(addr, tendermint::NodeApp);
+    // init message processor (generic processor that doesn't depend on tendermint)
+    let prc = processor::Processor{};
+
+    // default to tendermint (it may change in the future)
+    info!("Initializing FedPI Node (Tendermint) at port: {}", port);
+    abci::run(addr, tendermint::NodeApp { processor: prc });
 }

@@ -5,4 +5,7 @@ authors = ["shumy <micaelpedrosa@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-clap = "^2.33"
+core-fpi = { version = "0.1", path = "../core-fpi" }
+clap = "2.33"
+reqwest = "0.9"
+base64 = "0.10"

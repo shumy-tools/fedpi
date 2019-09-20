@@ -5,8 +5,9 @@ authors = ["shumy <micaelpedrosa@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-core-fpi = { version = "0.1.0", path = "../core-fpi" }
-clap = "^2.33"
-abci = "^0.6"
-log = "^0.4"
-env_logger = "^0.6"
+core-fpi = { version = "0.1", path = "../core-fpi" }
+clap = "2.33"
+abci = "0.6"
+base64 = "0.10"
+log = "0.4"
+env_logger = "0.6"
