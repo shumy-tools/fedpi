@@ -16,5 +16,5 @@ tendermint node --home ./test-net/node3
 # Tendermint Testing
 curl -s localhost:26660/status
 
-curl -s 'localhost:26660/broadcast_tx_commit?tx="name=satoshi"
+curl -s 'localhost:26660/broadcast_tx_commit?tx="name=satoshi"'
 curl -s 'localhost:26660/abci_query?data="name"'

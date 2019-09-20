@@ -1,7 +1,8 @@
+use core_fpi::Result;
+
 use log::{info, error};
 use abci::*;
 
-use crate::Result;
 use crate::processor::Processor;
 
 fn convert(tx: &[u8]) -> Result<Vec<u8>> {

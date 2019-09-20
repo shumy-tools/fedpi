@@ -4,7 +4,7 @@ use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 
 use crate::crypto::signatures::Signature;
-use crate::{FIRST, Result};
+use crate::{OPEN, CLOSE, Result};
 
 //-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record
@@ -31,15 +31,20 @@ impl Record {
 
     pub fn check(&self, last: Option<&Record>, base: &RistrettoPoint, pseudonym: &CompressedRistretto) -> Result<()> {
         let prev = match last {
-            None => if self.prev != FIRST {
-                return Err("Record not marked as First!")
+            None => if self.prev != OPEN {
+                return Err("Record not marked as Open!")
             } else {
-                FIRST
+                OPEN
             },
             
             Some(last) => {
+                // TODO: verify if the stream is not closed?
+                if String::from_utf8_lossy(&last.data) == CLOSE {
+                    return Err("The stream is closed!")
+                }
+
                 if self.prev != *last.id() {
-                    return Err("Record not part of the chain!")
+                    return Err("Record is not part of the stream!")
                 }
 
                 // verify signature of last record with the same key. The chain must have the same key.
@@ -65,7 +70,7 @@ impl Record {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{G, FIRST, rnd_scalar};
+    use crate::{G, OPEN, rnd_scalar};
 
     #[allow(non_snake_case)]
     #[test]
@@ -75,7 +80,7 @@ mod tests {
         let pseudonym = (secret * base).compress();
         
         let r_data = "record data".as_bytes();
-        let record = Record::new(FIRST, r_data, &base, &secret, &pseudonym);
+        let record = Record::new(OPEN, r_data, &base, &secret, &pseudonym);
         assert!(record.check(None, &base, &pseudonym) == Ok(()));
     }
 
@@ -87,12 +92,12 @@ mod tests {
         let pseudonym = (secret * base).compress();
         
         let r_data = "record data".as_bytes();
-        let record = Record::new(FIRST, r_data, &base, &secret, &pseudonym);
+        let record = Record::new(OPEN, r_data, &base, &secret, &pseudonym);
         assert!(record.check(None, &base, &pseudonym) == Ok(()));
 
         let r_data1 = "next data1".as_bytes();
-        let record1 = Record::new(FIRST, r_data1, &base, &secret, &pseudonym);
-        assert!(record1.check(Some(&record), &base, &pseudonym) == Err("Record not part of the chain!"));
+        let record1 = Record::new(OPEN, r_data1, &base, &secret, &pseudonym);
+        assert!(record1.check(Some(&record), &base, &pseudonym) == Err("Record is not part of the stream!"));
 
         let secret1 = rnd_scalar();
         let pseudonym1 = (secret1 * base).compress();

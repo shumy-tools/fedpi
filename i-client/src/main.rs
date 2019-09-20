@@ -1,7 +1,7 @@
 #[forbid(unsafe_code)]
 use clap::{Arg, App, SubCommand};
 
-use core_fpi::{G, rnd_scalar};
+use core_fpi::{G, rnd_scalar, Scalar, CompressedRistretto};
 use core_fpi::ids::*;
 
 use core_fpi::messages::Message;
@@ -14,6 +14,18 @@ fn create() -> Message {
 
     let sid = "s-id:shumy";
     let skey1 = SubjectKey::new(sid, 0, sig_key, &sig_s, &sig_key);
+
+    let mut sub = Subject::new(sid);
+    sub.push_key(skey1);
+
+    Message::SyncSubject(sub)
+}
+
+fn evolve(index: usize, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Message {
+    let new_key = (rnd_scalar() * G).compress();
+
+    let sid = "s-id:shumy";
+    let skey1 = SubjectKey::new(sid, index, new_key, &sig_s, &sig_key);
 
     let mut sub = Subject::new(sid);
     sub.push_key(skey1);
@@ -36,6 +48,9 @@ fn main() {
             .arg(Arg::with_name("create")
                 .takes_value(false)
                 .help("Request the creation of a Subject")))
+            .arg(Arg::with_name("evolve")
+                .takes_value(true)
+                .help("Request evolution of the subject key"))
         .get_matches();
     
     let str_host = matches.value_of("host").unwrap().to_owned();
@@ -44,8 +59,15 @@ fn main() {
         let url = if matches.is_present("create") {
             let msg = create().encode().unwrap();
             let data = base64::encode(&msg);
-            format!("http://{}/broadcast_tx_commit?tx={:?}", str_host, data)
-        } else {
+            format!("http://{}/broadcast_tx_commit?tx={:?}", str_host, data.trim())
+        } else /*if matches.is_present("evolve") {
+            let str_evolve = matches.value_of("evolve").unwrap().to_owned();
+            let index = str_evolve.trim().parse::<usize>().unwrap();
+            
+            let msg = evolve(index).encode().unwrap();
+            let data = base64::encode(&msg);
+            format!("http://{}/broadcast_tx_commit?tx={:?}", str_host, data.trim())
+        } else*/ {
             format!("http://{}/status", str_host)
         };
 

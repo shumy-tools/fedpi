@@ -13,8 +13,6 @@ mod tendermint;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-pub type Result<T> = std::result::Result<T, &'static str>;
-
 fn main() {
     let matches = App::new("FedPI Node")
         .version(VERSION)
@@ -63,7 +61,7 @@ fn main() {
         .init();
 
     // init message processor (generic processor that doesn't depend on tendermint)
-    let prc = processor::Processor{};
+    let prc = processor::Processor::new();
 
     // default to tendermint (it may change in the future)
     info!("Initializing FedPI Node (Tendermint) at port: {}", port);

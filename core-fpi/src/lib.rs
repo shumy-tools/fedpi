@@ -1,8 +1,8 @@
 #[forbid(unsafe_code)]
 
-use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
-use curve25519_dalek::scalar::Scalar;
+pub use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
+pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
+pub use curve25519_dalek::scalar::Scalar;
 
 use rand_os::OsRng;
 
@@ -16,8 +16,8 @@ pub use crate::structs::*;
 
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 
-pub const FIRST: &str = "FIRST";
-pub const LAST: &str = "LAST";
+pub const OPEN: &str = "OPEN";
+pub const CLOSE: &str = "CLOSE";
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 
