@@ -21,14 +21,14 @@ fn create() -> Message {
     Message::SyncSubject(sub)
 }
 
-fn evolve(index: usize, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Message {
+fn evolve(current: Subject, ikey: CompressedRistretto, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Message {
     let new_key = (rnd_scalar() * G).compress();
 
-    let sid = "s-id:shumy";
-    let skey1 = SubjectKey::new(sid, index, new_key, &sig_s, &sig_key);
+    let active_key = current.keys.last().unwrap();
+    //let new_key = active_key.evolve(
 
-    let mut sub = Subject::new(sid);
-    sub.push_key(skey1);
+    let mut sub = Subject::new(&current.sid);
+    //sub.push_key(skey1);
 
     Message::SyncSubject(sub)
 }
