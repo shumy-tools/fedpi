@@ -48,24 +48,25 @@ impl Subject {
         }
     }
 
-    pub fn push_key(&mut self, skey: SubjectKey) {
-        self.keys.push(skey);
-    }
-
-    pub fn find_profile(&self, typ: &str, lurl: &str) -> Option<&Profile> {
+    pub fn find(&self, typ: &str, lurl: &str) -> Option<&Profile> {
         let pid = Profile::pid(typ, lurl);
         self.profiles.get(&pid)
     }
 
-    pub fn push_profile(&mut self, profile: Profile) -> &mut Self {
+    pub fn push(&mut self, profile: Profile) -> &mut Self {
         self.profiles.insert(profile.id(), profile);
         self
     }
 
-    pub fn merge<'a>(&self, mut current: Subject) -> Subject {
-        current.keys.extend_from_slice(&self.keys);
-        
-        current
+    pub fn merge(&mut self, update: Subject) {
+        self.keys.extend_from_slice(&update.keys);
+
+        for (key, item) in update.profiles.into_iter() {
+            match self.profiles.get_mut(&key) {
+                None => {self.profiles.insert(key, item); ()},
+                Some(ref mut current) => current.merge(item)
+            }
+        }
     }
 
     pub fn check(&self, current: Option<&Subject>) -> Result<()> {
@@ -234,8 +235,8 @@ impl Profile {
         (secret, pkey)
     }
 
-    pub fn push_key(&mut self, pkey: ProfileKey) {
-        self.chain.push(pkey);
+    fn merge(&mut self, update: Profile) {
+        self.chain.extend(update.chain);
     }
 
     fn check(&self, sid: &str, current: Option<&Profile>, sig_key: &SubjectKey) -> Result<()> {
@@ -327,44 +328,44 @@ mod tests {
         let (_, skey1) = new1.evolve(sig_s1);
 
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.push_key(p1.evolve(sid, &sig_s1, &skey1).1);
+        p1.chain.push(p1.evolve(sid, &sig_s1, &skey1).1);
 
         let mut p2 = Profile::new("Finance", "https://profile-url.org");
-        p2.push_key(p2.evolve(sid, &sig_s1, &skey1).1);
+        p2.chain.push(p2.evolve(sid, &sig_s1, &skey1).1);
 
         new1
-            .push_profile(p1)
-            .push_profile(p2)
-            .push_key(skey1.clone());
+            .push(p1)
+            .push(p2)
+            .keys.push(skey1.clone());
         assert!(new1.check(None) == Ok(()));
 
         //--------------------------------------------------
         // Evolving SubjectKey
         // -------------------------------------------------
         let mut update1 = Subject::new(sid);
-        update1.push_key(new1.evolve(sig_s1).1);
+        update1.keys.push(new1.evolve(sig_s1).1);
         assert!(update1.check(Some(&new1)) == Ok(()));
 
         //--------------------------------------------------
         // Updating Profile
         // -------------------------------------------------
         let mut p3 = Profile::new("HealthCare", "https://profile-url.org");
-        p3.push_key(p3.evolve(sid, &sig_s1, &skey1).1);
+        p3.chain.push(p3.evolve(sid, &sig_s1, &skey1).1);
 
         let mut update2 = Subject::new(sid);
-        update2.push_profile(p3);
+        update2.push(p3);
         assert!(update2.check(Some(&new1)) == Ok(()));
 
         //--------------------------------------------------
         // Updating ProfileKey
         // -------------------------------------------------
-        let p2 = new1.find_profile("Finance", "https://profile-url.org").unwrap();
+        let p2 = new1.find("Finance", "https://profile-url.org").unwrap();
 
         let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
-        empty_p2.push_key(p2.evolve(sid, &sig_s1, &skey1).1);
+        empty_p2.chain.push(p2.evolve(sid, &sig_s1, &skey1).1);
 
         let mut update3 = Subject::new(sid);
-        update3.push_profile(empty_p2);
+        update3.push(empty_p2);
         assert!(update3.check(Some(&new1)) == Ok(()));
         
         // println!("ERROR: {:?}", subject3.check(Some(&subject1)));
@@ -381,11 +382,11 @@ mod tests {
         let (_, skey1) = new1.evolve(sig_s1);
         
         let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.push_key(p1.evolve(sid, &sig_s1, &skey1).1);
+        p1.chain.push(p1.evolve(sid, &sig_s1, &skey1).1);
 
         new1
-            .push_profile(p1.clone())
-            .push_key(skey1.clone());
+            .push(p1.clone())
+            .keys.push(skey1.clone());
         assert!(new1.check(None) == Ok(()));
 
         //--------------------------------------------------
@@ -395,7 +396,7 @@ mod tests {
         assert!(incorrect.check(None) == Err("No key found for subject creation!"));
 
         let mut incorrect = Subject::new(sid);
-        incorrect.push_key(SubjectKey::new(sid, 1, sig_key1, &sig_s1, &sig_key1));
+        incorrect.keys.push(SubjectKey::new(sid, 1, sig_key1, &sig_s1, &sig_key1));
         assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!"));
 
         //--------------------------------------------------
@@ -409,11 +410,11 @@ mod tests {
         let skey3 = SubjectKey::new(sid, 1, sig_key2, &sig_s2, &sig_key2);
 
         let mut incorrect = Subject::new(sid);
-        incorrect.push_key(skey2);
+        incorrect.keys.push(skey2);
         assert!(incorrect.check(Some(&new1)) == Err("Incorrect index for new subject-key!"));
 
         let mut incorrect = Subject::new(sid);
-        incorrect.push_key(skey3);
+        incorrect.keys.push(skey3);
         assert!(incorrect.check(Some(&new1)) == Err("Invalid subject-key signature!"));
 
         //--------------------------------------------------
@@ -422,12 +423,12 @@ mod tests {
         let mut p2 = Profile::new("Assets", "https://profile-url.org");
         let mut p2_key = p1.evolve(sid, &sig_s1, &skey1).1;
         p2_key.index = 0;
-        p2.push_key(p2_key);
+        p2.chain.push(p2_key);
 
         //p2.new_key(sid, 0, &sig_s1, &new1.keys.last().unwrap());
 
         let mut update1 = Subject::new(sid);
-        update1.push_profile(p2);
+        update1.push(p2);
         assert!(update1.check(Some(&new1)) == Err("ProfileKey is not correcly chained!"));
 
     }

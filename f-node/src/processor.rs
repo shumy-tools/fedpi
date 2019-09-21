@@ -55,11 +55,10 @@ impl Processor {
         let current = self.subjects.remove(&sid);
         match current {
             None => self.subjects.insert(sid, subject),
-            Some(current) => {
-                let merged = subject.merge(current);
-                info!("merged-subject - {:#?}", merged);
-
-                self.subjects.insert(sid, merged)
+            Some(mut current) => {
+                current.merge(subject);
+                info!("merged-subject - {:#?}", current);
+                self.subjects.insert(sid, current)
             }
         };
 

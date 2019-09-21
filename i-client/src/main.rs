@@ -1,37 +1,9 @@
 #[forbid(unsafe_code)]
 use clap::{Arg, App, SubCommand};
 
-use core_fpi::{G, rnd_scalar, Scalar, CompressedRistretto};
-use core_fpi::ids::*;
-
-use core_fpi::messages::Message;
+mod store;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-
-fn create() -> Message {
-    let sig_s = rnd_scalar();
-    let sig_key = (sig_s * G).compress();
-
-    let sid = "s-id:shumy";
-    let skey1 = SubjectKey::new(sid, 0, sig_key, &sig_s, &sig_key);
-
-    let mut sub = Subject::new(sid);
-    sub.push_key(skey1);
-
-    Message::SyncSubject(sub)
-}
-
-fn evolve(current: Subject, ikey: CompressedRistretto, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Message {
-    let new_key = (rnd_scalar() * G).compress();
-
-    let active_key = current.keys.last().unwrap();
-    //let new_key = active_key.evolve(
-
-    let mut sub = Subject::new(&current.sid);
-    //sub.push_key(skey1);
-
-    Message::SyncSubject(sub)
-}
 
 fn main() {
     let matches = App::new("FedPI Node")
@@ -43,6 +15,11 @@ fn main() {
             .required(true)
             .long("host")
             .takes_value(true))
+        .arg(Arg::with_name("sid")
+            .help("Select the subject-id and respective store")
+            .required(true)
+            .long("sid")
+            .takes_value(true))
         .subcommand(SubCommand::with_name("cmd")
             .about("Controls the request command type")
             .arg(Arg::with_name("create")
@@ -53,22 +30,18 @@ fn main() {
                 .help("Request evolution of the subject key"))
         .get_matches();
     
-    let str_host = matches.value_of("host").unwrap().to_owned();
+    let host = matches.value_of("host").unwrap().to_owned();
+    let sid = matches.value_of("sid").unwrap().to_owned();
+
+    let store = store::Store::new(&sid).unwrap();
 
     if let Some(matches) = matches.subcommand_matches("cmd") {
         let url = if matches.is_present("create") {
-            let msg = create().encode().unwrap();
+            let msg = store.create().unwrap().encode().unwrap();
             let data = base64::encode(&msg);
-            format!("http://{}/broadcast_tx_commit?tx={:?}", str_host, data.trim())
-        } else /*if matches.is_present("evolve") {
-            let str_evolve = matches.value_of("evolve").unwrap().to_owned();
-            let index = str_evolve.trim().parse::<usize>().unwrap();
-            
-            let msg = evolve(index).encode().unwrap();
-            let data = base64::encode(&msg);
-            format!("http://{}/broadcast_tx_commit?tx={:?}", str_host, data.trim())
-        } else*/ {
-            format!("http://{}/status", str_host)
+            format!("http://{}/broadcast_tx_commit?tx={:?}", host, data.trim())
+        } else {
+            format!("http://{}/status", host)
         };
 
         println!("GET {}", url);
