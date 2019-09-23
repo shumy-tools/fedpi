@@ -1,7 +1,9 @@
 #[forbid(unsafe_code)]
+
+use std::io::{Error, ErrorKind};
 use clap::{Arg, App, SubCommand};
 
-mod store;
+mod storage;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -33,19 +35,29 @@ fn main() {
     let host = matches.value_of("host").unwrap().to_owned();
     let sid = matches.value_of("sid").unwrap().to_owned();
 
-    let store = store::Store::new(&sid).unwrap();
-
-    if let Some(matches) = matches.subcommand_matches("cmd") {
-        let url = if matches.is_present("create") {
-            let msg = store.create().unwrap().encode().unwrap();
-            let data = base64::encode(&msg);
-            format!("http://{}/broadcast_tx_commit?tx={:?}", host, data.trim())
-        } else {
-            format!("http://{}/status", host)
-        };
+    let mut sm = storage::SubjectManager::new(&sid, |msg| {
+        let msg_data = msg.encode().map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message (base64)!"))?;
+        let data = base64::encode(&msg_data);
+        let url = format!("http://{}/broadcast_tx_commit?tx={:?}", host, data.replace(&[' ', '+'][..], ""));
 
         println!("GET {}", url);
-        let resp = reqwest::get(url.as_str()).unwrap();
+        let resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
+        
         println!("{:#?}", resp);
+        Ok(())
+    });
+
+    if let Some(matches) = matches.subcommand_matches("cmd") {
+        if matches.is_present("create") {
+            sm.create().unwrap();
+        } if matches.is_present("evolve") {
+            sm.evolve().unwrap();
+        } else {
+            let url = format!("http://{}/status", host);
+            
+            println!("GET {}", url);
+            let resp = reqwest::get(url.as_str()).unwrap();
+            println!("{:#?}", resp);
+        };
     }
 }
