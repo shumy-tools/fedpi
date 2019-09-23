@@ -11,3 +11,7 @@ Cargo.lock
 test-net/**/write-file-atomic*
 test-net/**/addrbook.json
 test-net/**/data/*.*
+
+*.sto
+*.mrg
+*.upd

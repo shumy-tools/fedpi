@@ -8,6 +8,6 @@ edition = "2018"
 core-fpi = { version = "0.1", path = "../core-fpi" }
 clap = "2.33"
 abci = "0.6"
-base64 = "0.10"
+bs58 = "0.2"
 log = "0.4"
 env_logger = "0.6"

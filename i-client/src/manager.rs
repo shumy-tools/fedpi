@@ -1,11 +1,13 @@
-use std::fs::{File, OpenOptions};
+use std::fmt::{Debug, Formatter};
+
+use std::fs::{File, OpenOptions, remove_file};
 use std::io::{Result, Error, ErrorKind};
 use std::io::prelude::*;
 
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 
-use core_fpi::{G, rnd_scalar, Scalar};
+use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder};
 use core_fpi::ids::*;
 use core_fpi::messages::Message;
 
@@ -72,6 +74,21 @@ impl Storage {
 
         write(&file, data)
     }
+
+    fn reset(sid: &str) {
+        Storage::clean(sid);
+        let sto = select(sid, SType::Stored);
+        remove_file(&sto).ok();
+    }
+
+    fn clean(sid: &str) {
+        let upd = select(sid, SType::Updating);
+        let mrg = select(sid, SType::Merged);
+
+        // nothing to do if it can't remove
+        remove_file(&upd).ok();
+        remove_file(&mrg).ok();
+    }
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -93,6 +110,10 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         Self { sid: sid.into(), upd: res.0, mrg: res.1, sto: res.2, sync: sync }
     }
 
+    pub fn reset(&mut self) {
+        Storage::reset(&self.sid);
+    }
+
     pub fn create(&mut self) -> Result<()> {
         self.check_pending()?;
         if let Some(_) = self.sto {
@@ -105,17 +126,9 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         let mut sub = Subject::new(&self.sid);
         sub.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
 
-        // create update
+        // sync update
         let update = MySubject { secret: secret, subject: sub.clone() };
-        Storage::store(&self.sid, SType::Updating, &update)?;
-        self.upd = Some(update);
-
-        // process sync message
-        (self.sync)(Message::SyncSubject(sub))?;
-
-        // TODO: merge result
-
-        Ok(())
+        self.sync_subject(update)
     }
 
     pub fn evolve(&mut self) -> Result<()> {
@@ -129,17 +142,9 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
                 let mut sub = Subject::new(&self.sid);
                 sub.keys.push(skey);
 
-                // create update
+                // sync update
                 let update = MySubject { secret: secret, subject: sub.clone() };
-                Storage::store(&self.sid, SType::Updating, &update)?;
-                self.upd = Some(update);
-
-                // process sync message
-                (self.sync)(Message::SyncSubject(sub))?;
-
-                // TODO: merge result
-
-                Ok(())
+                self.sync_subject(update)
             }
         }
     }
@@ -155,13 +160,50 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
 
         Ok(())
     }
+
+    fn sync_subject(&mut self, update: MySubject) -> Result<()> {
+        let subject = update.subject.clone();
+        let sid = subject.sid.clone();
+
+        Storage::store(&self.sid, SType::Updating, &update)?;
+        self.upd = Some(update);
+
+        // process sync message
+        (self.sync)(Message::SyncSubject(subject.clone()))?;
+
+        // merge with existent
+        let merged = match self.sto.take() {
+            None => self.upd.take().unwrap(),
+            Some(mut stored) => {
+                stored.subject.merge(subject);
+                Storage::store(&self.sid, SType::Merged, &stored)?;
+                stored
+            }
+        };
+
+        // store final result
+        Storage::store(&self.sid, SType::Stored, &merged)?;
+        self.sto = Some(merged);
+        Storage::clean(&sid);
+
+        Ok(())
+    }
 }
 
 //-----------------------------------------------------------------------------------------------------------
 // MySubject
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct MySubject {
     secret: Scalar,
     subject: Subject
+}
+
+impl Debug for MySubject {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("MySubject")
+            .field("secret", &self.secret.encode())
+            .field("subject", &self.subject)
+            .finish()
+    }
 }

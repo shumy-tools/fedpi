@@ -6,7 +6,7 @@ use abci::*;
 use crate::processor::Processor;
 
 fn convert(tx: &[u8]) -> Result<Vec<u8>> {
-    base64::decode(tx).map_err(|_| "Unable to decode base64 input!")
+    bs58::decode(tx).into_vec().map_err(|_| "Unable to decode base58 input!")
 }
 
 pub struct NodeApp {
