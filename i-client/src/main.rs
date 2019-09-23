@@ -41,10 +41,8 @@ fn main() {
         let msg_data = msg.encode().map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message (base64)!"))?;
         let data = bs58::encode(&msg_data).into_string();
 
-        println!("ORIGINAL: {:?}", data);
         let url = format!("http://{}/broadcast_tx_commit?tx={:?}", host, data);
-
-        println!("GET {}", url);
+        
         let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
         let value: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 

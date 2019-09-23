@@ -127,7 +127,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         sub.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
 
         // sync update
-        let update = MySubject { secret: secret, subject: sub.clone() };
+        let update = MySubject { secret: secret, subject: sub };
         self.sync_subject(update)
     }
 
@@ -143,7 +143,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
                 sub.keys.push(skey);
 
                 // sync update
-                let update = MySubject { secret: secret, subject: sub.clone() };
+                let update = MySubject { secret: secret, subject: sub };
                 self.sync_subject(update)
             }
         }
@@ -162,6 +162,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
     }
 
     fn sync_subject(&mut self, update: MySubject) -> Result<()> {
+        let secret = update.secret.clone();
         let subject = update.subject.clone();
         let sid = subject.sid.clone();
 
@@ -175,6 +176,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         let merged = match self.sto.take() {
             None => self.upd.take().unwrap(),
             Some(mut stored) => {
+                stored.secret = secret;
                 stored.subject.merge(subject);
                 Storage::store(&self.sid, SType::Merged, &stored)?;
                 stored

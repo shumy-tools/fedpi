@@ -359,15 +359,27 @@ mod tests {
         //--------------------------------------------------
         // Updating ProfileKey
         // -------------------------------------------------
-        let p2 = new1.find("Finance", "https://profile-url.org").unwrap();
+        let p2 = new1.find("Finance", "https://profile-url.org").unwrap().clone();
 
         let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
         empty_p2.chain.push(p2.evolve(sid, &sig_s1, &skey1).1);
 
         let mut update3 = Subject::new(sid);
-        update3.push(empty_p2);
+        update3.push(empty_p2.clone());
         assert!(update3.check(Some(&new1)) == Ok(()));
         
+        //--------------------------------------------------
+        // Merge and update
+        // -------------------------------------------------
+        new1.merge(update3);
+
+        let mut empty_p3 = Profile::new("Finance", "https://profile-url.org");
+        empty_p3.chain.push(empty_p2.evolve(sid, &sig_s1, &skey1).1);
+
+        let mut update4 = Subject::new(sid);
+        update4.push(empty_p3);
+        assert!(update4.check(Some(&new1)) == Ok(()));
+
         // println!("ERROR: {:?}", subject3.check(Some(&subject1)));
     }
 
