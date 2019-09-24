@@ -7,13 +7,16 @@ use core_fpi::ids::*;
 use core_fpi::messages::*;
 use core_fpi::messages::Message::*;
 
+use crate::config::Config;
+
 pub struct Processor {
+    config: Config,
     subjects: HashMap<String, Subject>
 }
 
 impl Processor {
-    pub fn new() -> Self {
-        Self { subjects: HashMap::new() }
+    pub fn new(config: Config) -> Self {
+        Self { config: config, subjects: HashMap::new() }
     }
 
     pub fn validate(&self, data: &[u8]) -> Result<()> {

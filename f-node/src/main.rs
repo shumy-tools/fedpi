@@ -8,6 +8,7 @@ use env_logger::fmt::Color;
 use log::Level::{Info, Warn, Error};
 use log::{info, LevelFilter};
 
+mod config;
 mod processor;
 mod tendermint;
 
@@ -30,12 +31,18 @@ fn main() {
             .short("p")
             .long("port")
             .takes_value(true))
+        .arg(Arg::with_name("home")
+            .help("Set the node-app config directory.")
+            .required(false)
+            .short("h")
+            .long("home")
+            .takes_value(true))
         .get_matches();
     
     let name = matches.value_of("name").unwrap().to_owned();
-
-    let str_port = matches.value_of("port");
-    let port: usize = match str_port {
+    let home = matches.value_of("home").unwrap_or("./");
+    
+    let port: usize = match matches.value_of("port") {
         None => 26658,
         Some(str_port) => str_port.trim().parse::<usize>().unwrap()
     };
@@ -60,8 +67,11 @@ fn main() {
         .filter(None, LevelFilter::Info)
         .init();
 
+    // read configuration from HOME/config/app.config.toml file
+    let cfg = config::Config::new(&home);
+
     // init message processor (generic processor that doesn't depend on tendermint)
-    let prc = processor::Processor::new();
+    let prc = processor::Processor::new(cfg);
 
     // default to tendermint (it may change in the future)
     info!("Initializing FedPI Node (Tendermint) at port: {}", port);

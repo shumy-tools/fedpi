@@ -1,0 +1,4 @@
+
+    secret = "3YTKs5yVk6QTxkWx1buG3MfkJZrR3CiiEz5wZnmfi8Lq"     # Scalar
+    pkey = "BGewfVeZtKH5RYDatgeBbgqorqid87zBQDcZCnFJY2HY"       # CompressedRistretto point
+    

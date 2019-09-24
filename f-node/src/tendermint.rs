@@ -14,6 +14,12 @@ pub struct NodeApp {
 }
 
 impl abci::Application for NodeApp {
+    fn init_chain(&mut self, req: &RequestInitChain) -> ResponseInitChain {
+        println!("INIT: {:#?}", req);
+        
+        ResponseInitChain::new()
+    }
+
     fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {        
         let tx = req.get_tx();
         info!("CheckTx-Input - {}", String::from_utf8_lossy(tx));
