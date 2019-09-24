@@ -1,10 +1,7 @@
 use serde::{Serialize, Deserialize};
 
-use curve25519_dalek::scalar::Scalar;
-use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
-
 use crate::crypto::signatures::Signature;
-use crate::{OPEN, CLOSE, Result};
+use crate::{OPEN, CLOSE, Result, Scalar, RistrettoPoint, CompressedRistretto};
 
 //-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record

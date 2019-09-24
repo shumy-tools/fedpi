@@ -3,11 +3,8 @@ use std::collections::HashMap;
 
 use serde::{Serialize, Deserialize};
 
-use curve25519_dalek::ristretto::CompressedRistretto;
-use curve25519_dalek::scalar::Scalar;
-
 use crate::crypto::signatures::IndSignature;
-use crate::{G, rnd_scalar, Result, KeyEncoder};
+use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, CompressedRistretto};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
@@ -26,7 +23,7 @@ impl Debug for Subject {
         fmt.debug_struct("Subject")
             .field("sid", &self.sid)
             .field("keys", &self.keys)
-            .field("profiles", &self.profiles)
+            .field("profiles", &self.profiles.values())
             .finish()
     }
 }
@@ -206,6 +203,7 @@ impl Debug for Profile {
         fmt.debug_struct("Profile")
             .field("typ", &self.typ)
             .field("lurl", &self.lurl)
+            .field("chain", &self.chain)
             .finish()
     }
 }

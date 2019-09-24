@@ -1,9 +1,6 @@
 #[forbid(unsafe_code)]
 
-pub use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
-pub use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
-pub use curve25519_dalek::scalar::Scalar;
-
+use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use rand_os::OsRng;
 
 mod macros;
@@ -11,11 +8,13 @@ mod crypto;
 mod structs;
 
 // -- Exported --
+pub use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
+pub use curve25519_dalek::scalar::Scalar;
+
 pub use crate::crypto::*;
 pub use crate::structs::*;
 
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
-
 pub const OPEN: &str = "OPEN";
 pub const CLOSE: &str = "CLOSE";
 

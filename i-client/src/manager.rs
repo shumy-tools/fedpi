@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
 use std::fs::{File, OpenOptions, remove_file};
@@ -127,7 +128,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         sub.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
 
         // sync update
-        let update = MySubject { secret: secret, subject: sub };
+        let update = MySubject { secret: secret, profile_secrets: HashMap::new(), subject: sub };
         self.sync_subject(update)
     }
 
@@ -143,7 +144,36 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
                 sub.keys.push(skey);
 
                 // sync update
-                let update = MySubject { secret: secret, subject: sub };
+                let update = MySubject { secret: secret, profile_secrets: HashMap::new(), subject: sub };
+                self.sync_subject(update)
+            }
+        }
+    }
+
+    pub fn profile(&mut self, typ: &str, lurl: &str) -> Result<()> {
+        self.check_pending()?;
+
+        match &self.sto {
+            None => return Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            Some(my) => {
+                let skey = my.subject.keys.last().ok_or(Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+
+                let mut profile = Profile::new(typ, lurl);
+                let (p_secret, pkey) = match my.subject.find(typ, lurl) {
+                    None => profile.evolve(&self.sid, &my.secret, skey),
+                    Some(current) => current.evolve(&self.sid, &my.secret, skey)
+                };
+
+                profile.chain.push(pkey);
+                
+                let mut profile_secrets = HashMap::<String, Scalar>::new();
+                profile_secrets.insert(profile.id(), p_secret);
+
+                let mut sub = Subject::new(&self.sid);
+                sub.push(profile);
+
+                // sync update
+                let update = MySubject { secret: my.secret, profile_secrets: profile_secrets, subject: sub };
                 self.sync_subject(update)
             }
         }
@@ -161,8 +191,11 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         Ok(())
     }
 
+    //TODO: improve performance. Try to remove the many clone() calls!
     fn sync_subject(&mut self, update: MySubject) -> Result<()> {
         let secret = update.secret.clone();
+        let profile_secrets = update.profile_secrets.clone();
+        
         let subject = update.subject.clone();
         let sid = subject.sid.clone();
 
@@ -177,6 +210,8 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
             None => self.upd.take().unwrap(),
             Some(mut stored) => {
                 stored.secret = secret;
+                stored.profile_secrets.extend(profile_secrets);
+
                 stored.subject.merge(subject);
                 Storage::store(&self.sid, SType::Merged, &stored)?;
                 stored
@@ -197,7 +232,9 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MySubject {
-    secret: Scalar,
+    secret: Scalar,                                 // current subject-key secret
+    profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
+
     subject: Subject
 }
 

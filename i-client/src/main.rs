@@ -32,6 +32,16 @@ fn main() {
             .about("Request the creation of a subject"))
         .subcommand(SubCommand::with_name("evolve")
             .about("Request the evolution of the subject key"))
+        .subcommand(SubCommand::with_name("profile")
+            .about("Request the creation or evolution of the subject profile")
+            .arg(Arg::with_name("type")
+                .help("Select the profile type")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("lurl")
+                .help("Selects the profile location URL")
+                .takes_value(true)
+                .required(true)))
         .get_matches();
     
     let host = matches.value_of("host").unwrap().to_owned();
@@ -63,6 +73,11 @@ fn main() {
         sm.create().unwrap();
     } else if matches.is_present("evolve") {
         sm.evolve().unwrap();
+    } else if matches.is_present("profile") {
+        let matches = matches.subcommand_matches("profile").unwrap();
+        let typ = matches.value_of("type").unwrap().to_owned();
+        let lurl = matches.value_of("lurl").unwrap().to_owned();
+        sm.profile(&typ, &lurl).unwrap();
     } else {
         let url = format!("http://{}/status", host);
         
