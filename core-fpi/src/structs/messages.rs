@@ -1,4 +1,6 @@
-use crate::{Result, Scalar, RistrettoPoint, CompressedRistretto};
+use std::fmt::{Debug, Formatter};
+
+use crate::{Result, KeyEncoder, Scalar, RistrettoPoint, CompressedRistretto};
 use crate::shares::{Share, RistrettoPolynomial};
 use crate::structs::ids::Subject;
 use crate::structs::records::Record;
@@ -85,7 +87,7 @@ impl KeyRequest {
 //--------------------------------------------------------------------
 // Response to MasterKey negotiation
 //--------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct KeyResponse {
     pub session: String,
     pub peers: Vec<RistrettoPoint>,
@@ -93,6 +95,19 @@ pub struct KeyResponse {
     pub commit: RistrettoPolynomial,
 
     pub sig: IndSignature
+}
+
+impl Debug for KeyResponse {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        let peers: Vec<String> = self.peers.iter().map(|p| p.compress().encode()).collect();
+        fmt.debug_struct("KeyResponse")
+            .field("session", &self.session)
+            .field("peers", &peers)
+            .field("shares", &self.shares)
+            .field("commit", &self.commit)
+            .field("sig", &self.sig)
+            .finish()
+    }
 }
 
 impl KeyResponse {

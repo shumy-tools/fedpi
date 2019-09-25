@@ -8,9 +8,9 @@ use std::io::prelude::*;
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 
-use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder};
+use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder};
 use core_fpi::ids::*;
-use core_fpi::messages::Transaction;
+use core_fpi::messages::*;
 
 fn select(sid: &str, typ: SType) -> String {
     match typ {
@@ -95,20 +95,21 @@ impl Storage {
 //-----------------------------------------------------------------------------------------------------------
 // SubjectManager
 //-----------------------------------------------------------------------------------------------------------
-pub struct SubjectManager<F> where F: Fn(Transaction) -> Result<()> {
+pub struct SubjectManager<F, Q> where F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response> {
     pub sid: String,
 
     pub upd: Option<MySubject>,
     pub mrg: Option<MySubject>,
     pub sto: Option<MySubject>,
 
-    sync: F
+    sync: F,
+    query: Q
 }
 
-impl<F: Fn(Transaction) -> Result<()>> SubjectManager<F> {
-    pub fn new(sid: &str, sync: F) -> Self {
+impl<F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response>> SubjectManager<F, Q> {
+    pub fn new(sid: &str, sync: F, query: Q) -> Self {
         let res = Storage::load(sid);
-        Self { sid: sid.into(), upd: res.0, mrg: res.1, sto: res.2, sync: sync }
+        Self { sid: sid.into(), upd: res.0, mrg: res.1, sto: res.2, sync: sync, query: query }
     }
 
     pub fn reset(&mut self) {
@@ -177,6 +178,18 @@ impl<F: Fn(Transaction) -> Result<()>> SubjectManager<F> {
                 self.sync_subject(update)
             }
         }
+    }
+
+    pub fn negotiate(&mut self) -> Result<()> {
+        let secret = rnd_scalar();
+        let key = secret * G;
+
+        let req = KeyRequest::sign(uuid().as_ref(), &secret, key);
+        let res = (self.query)(Request::NegotiateMasterKey(req));
+
+        println!("RESP: {:#?}", res);
+
+        Ok(())
     }
 
     fn check_pending(&self) -> Result<()> {

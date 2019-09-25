@@ -1,7 +1,8 @@
 #[forbid(unsafe_code)]
 
-use std::io::{Error, ErrorKind};
+use std::io::{Result, Error, ErrorKind};
 use clap::{Arg, App, SubCommand};
+use core_fpi::messages::*;
 
 use serde::Deserialize;
 
@@ -42,29 +43,51 @@ fn main() {
                 .help("Selects the profile location URL")
                 .takes_value(true)
                 .required(true)))
+        .subcommand(SubCommand::with_name("negotiate-key")
+            .about("Fires the negotiation protocol to create a master key"))
         .get_matches();
     
     let host = matches.value_of("host").unwrap().to_owned();
     let sid = matches.value_of("sid").unwrap().to_owned();
 
-    let mut sm = manager::SubjectManager::new(&sid, |msg| {
+    let tx_handler = |msg: Transaction| -> Result<()> {
         let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
         let data = bs58::encode(&msg_data).into_string();
 
         let url = format!("http://{}/broadcast_tx_commit?tx={:?}", host, data);
         
         let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
-        let value: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
+        let res: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 
-        println!("{:#?}", value);        
-        if value.result.check_tx.code != 0 || value.result.deliver_tx.code != 0 {
+        println!("{:#?}", res);        
+        if res.result.check_tx.code != 0 || res.result.deliver_tx.code != 0 {
             return Err(Error::new(ErrorKind::Other, "Tx error from network!"))
         }
 
         Ok(())
-    });
+    };
 
-    // http://localhost:26660/abci_query?data="IHAVENOIDEA"
+    let query_handler = |msg: Request| -> Result<Response> {
+        let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
+        let data = bs58::encode(&msg_data).into_string();
+
+        let url = format!("http://{}/abci_query?data={:?}", host, data);
+
+        let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
+        let res: QueryResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
+
+        println!("{:#?}", res);        
+        if res.result.response.code != 0 {
+            return Err(Error::new(ErrorKind::Other, "Query error from network!"))
+        }
+        
+        let data = base64::decode(&res.result.response.value).map_err(|_| Error::new(ErrorKind::Other, "Unable to decode base64!"))?;
+        let response: Response = core_fpi::messages::decode(data.as_ref()).map_err(|_| Error::new(ErrorKind::Other, "Unable to decode message!"))?;
+
+        Ok(response)
+    };
+
+    let mut sm = manager::SubjectManager::new(&sid, tx_handler, query_handler);
 
     if matches.is_present("reset") {
         println!("Reseting {:?}", sid);
@@ -80,6 +103,8 @@ fn main() {
         let typ = matches.value_of("type").unwrap().to_owned();
         let lurl = matches.value_of("lurl").unwrap().to_owned();
         sm.profile(&typ, &lurl).unwrap();
+    } else if matches.is_present("negotiate-key") {
+        sm.negotiate().unwrap();
     } else {
         let url = format!("http://{}/status", host);
         
@@ -120,33 +145,39 @@ struct DeliverTxResult {
     info: String
 }
 
-/*
-{
-  "jsonrpc": "2.0",
-  "id": "",
-  "result": {
-    "check_tx": {
-      "code": 1,
-      "data": null,
-      "log": "Incorrect index for new subject-key!",
-      "info": "",
-      "gasWanted": "0",
-      "gasUsed": "0",
-      "events": [],
-      "codespace": ""
-    },
-    "deliver_tx": {
-      "code": 0,
-      "data": null,
-      "log": "",
-      "info": "",
-      "gasWanted": "0",
-      "gasUsed": "0",
-      "events": [],
-      "codespace": ""
-    },
-    "hash": "8F58D768B119FF81A71B19092E8575A867CCCED7E7A09613629E65436443E88B",
-    "height": "0"
-  }
+
+#[derive(Deserialize, Debug)]
+struct QueryResult {
+    jsonrpc: String,
+    id: String,
+    result: QueryResultBody
 }
-*/
+
+#[derive(Deserialize, Debug)]
+struct QueryResultBody {
+    response: QueryResultResponse
+}
+
+#[derive(Deserialize, Debug)]
+struct QueryResultResponse {
+    code: i32,
+    log: String,
+    value: String
+}
+
+/*{
+  "error": "",
+  "result": {
+    "response": {
+      "log": "exists",
+      "height": "0",
+      "proof": "010114FED0DAD959F36091AD761C922ABA3CBF1D8349990101020103011406AA2262E2F448242DF2C2607C3CDC705313EE3B0001149D16177BC71E445476174622EA559715C293740C",
+      "value": "61626364",
+      "key": "61626364",
+      "index": "-1",
+      "code": "0"
+    }
+  },
+  "id": "",
+  "jsonrpc": "2.0"
+}*/

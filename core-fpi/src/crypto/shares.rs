@@ -1,18 +1,28 @@
+use std::fmt::{Debug, Formatter};
+
 use core::ops::{Add, Mul, Sub};
 use rand_os::OsRng;
 
 use serde::{Serialize, Deserialize};
 
-use curve25519_dalek::ristretto::RistrettoPoint;
-use curve25519_dalek::scalar::Scalar;
+use crate::{Scalar, RistrettoPoint, KeyEncoder};
 
 //-----------------------------------------------------------------------------------------------------------
 // Share
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Share {
     pub i: u32,
     pub yi: Scalar
+}
+
+impl Debug for Share {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("Share")
+            .field("i", &self.i)
+            .field("yi", &self.yi.encode())
+            .finish()
+    }
 }
 
 impl<'a, 'b> Add<&'b Share> for &'a Share {
@@ -64,10 +74,19 @@ impl<'a, 'b> Mul<&'b RistrettoPoint> for &'a Share {
 // RistrettoShare
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct RistrettoShare {
     pub i: u32,
     pub Yi: RistrettoPoint
+}
+
+impl Debug for RistrettoShare {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("RistrettoShare")
+            .field("i", &self.i)
+            .field("Yi", &self.Yi.compress().encode())
+            .finish()
+    }
 }
 
 impl<'a, 'b> Add<&'b RistrettoPoint> for &'a RistrettoShare {
@@ -262,9 +281,18 @@ impl Degree for Polynomial {
 // RistrettoPolynomial
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RistrettoPolynomial {
     pub A: Vec<RistrettoPoint>
+}
+
+impl Debug for RistrettoPolynomial {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        let poly: Vec<String> = self.A.iter().map(|p| p.compress().encode()).collect();
+        fmt.debug_struct("RistrettoPolynomial")
+            .field("A", &poly)
+            .finish()
+    }
 }
 
 impl<'a, 'b> Mul<&'b Scalar> for &'a RistrettoPolynomial {
