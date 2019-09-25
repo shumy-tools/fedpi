@@ -1,13 +1,15 @@
 use core::ops::{Add, Mul, Sub};
 use rand_os::OsRng;
 
+use serde::{Serialize, Deserialize};
+
 use curve25519_dalek::ristretto::RistrettoPoint;
 use curve25519_dalek::scalar::Scalar;
 
 //-----------------------------------------------------------------------------------------------------------
 // Share
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct Share {
     pub i: u32,
     pub yi: Scalar
@@ -62,7 +64,7 @@ impl<'a, 'b> Mul<&'b RistrettoPoint> for &'a Share {
 // RistrettoShare
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct RistrettoShare {
     pub i: u32,
     pub Yi: RistrettoPoint
@@ -260,7 +262,7 @@ impl Degree for Polynomial {
 // RistrettoPolynomial
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct RistrettoPolynomial {
     pub A: Vec<RistrettoPoint>
 }

@@ -48,7 +48,7 @@ fn main() {
     let sid = matches.value_of("sid").unwrap().to_owned();
 
     let mut sm = manager::SubjectManager::new(&sid, |msg| {
-        let msg_data = msg.encode().map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message (base64)!"))?;
+        let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
         let data = bs58::encode(&msg_data).into_string();
 
         let url = format!("http://{}/broadcast_tx_commit?tx={:?}", host, data);
@@ -63,6 +63,8 @@ fn main() {
 
         Ok(())
     });
+
+    // http://localhost:26660/abci_query?data="IHAVENOIDEA"
 
     if matches.is_present("reset") {
         println!("Reseting {:?}", sid);

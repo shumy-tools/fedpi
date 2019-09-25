@@ -14,28 +14,44 @@ pub struct NodeApp {
 }
 
 impl abci::Application for NodeApp {
-    fn init_chain(&mut self, req: &RequestInitChain) -> ResponseInitChain {
-        println!("INIT: {:#?}", req);
-        
-        ResponseInitChain::new()
-    }
+    fn query(&mut self, req: &RequestQuery) -> ResponseQuery {
+        info!("Query-Input - {}", String::from_utf8_lossy(&req.data));
+        let mut resp = ResponseQuery::new();
 
-    fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {        
-        let tx = req.get_tx();
-        info!("CheckTx-Input - {}", String::from_utf8_lossy(tx));
-
-        let msg = match convert(tx) {
+        let msg = match convert(&req.data) {
             Ok(value) => value,
             Err(err) => {
-                error!("CheckTx ({:?})", err);
-                let mut resp = ResponseCheckTx::new();
+                error!("Query ({:?})", err);
                 resp.set_code(1);
                 resp.set_log(err.into());
                 return resp
             }
         };
 
+        if let Err(err) = self.processor.request(&msg) {
+            error!("Query ({:?})", err);
+            resp.set_code(1);
+            resp.set_log(err.into());
+        }
+        
+        resp
+    }
+
+    fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {        
+        let tx = req.get_tx();
+        info!("CheckTx-Input - {}", String::from_utf8_lossy(tx));
         let mut resp = ResponseCheckTx::new();
+
+        let msg = match convert(tx) {
+            Ok(value) => value,
+            Err(err) => {
+                error!("CheckTx ({:?})", err);
+                resp.set_code(1);
+                resp.set_log(err.into());
+                return resp
+            }
+        };
+
         if let Err(err) = self.processor.validate(&msg) {
             error!("CheckTx ({:?})", err);
             resp.set_code(1);
@@ -48,19 +64,18 @@ impl abci::Application for NodeApp {
     fn deliver_tx(&mut self, req: &RequestDeliverTx) -> ResponseDeliverTx {
         let tx = req.get_tx();
         info!("DeliverTx-Input - {}", String::from_utf8_lossy(tx));
+        let mut resp = ResponseDeliverTx::new();
 
         let msg = match convert(tx) {
             Ok(value) => value,
             Err(err) => {
                 error!("DeliverTx ({:?})", err);
-                let mut resp = ResponseDeliverTx::new();
                 resp.set_code(1);
                 resp.set_log(err.into());
                 return resp
             }
         };
-        
-        let mut resp = ResponseDeliverTx::new();
+
         if let Err(err) = self.processor.commit(&msg) {
             // The tx should have been rejected by the mempool, but may have been included in a block by a Byzantine proposer!
             error!("DeliverTx ({:?})", err);

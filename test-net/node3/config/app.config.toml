@@ -1,4 +1,21 @@
+secret = "49b965VRKbkmk8nS98HYPkMhyyRPvCTWsBk1grW31zP8"     # Scalar
+pkey = "GoJ6vqxdTGZucaaZP268oV5pcu8BMpHiUupfwpgk68MP"       # CompressedRistretto point
+threshold = 1                                               # where #peers >= 3 * t
 
-    secret = "49b965VRKbkmk8nS98HYPkMhyyRPvCTWsBk1grW31zP8"     # Scalar
-    pkey = "GoJ6vqxdTGZucaaZP268oV5pcu8BMpHiUupfwpgk68MP"       # CompressedRistretto point
-    
+# List of valid peers
+[peers]
+    [peers.0]
+    name = "node0"
+    pkey = "BGewfVeZtKH5RYDatgeBbgqorqid87zBQDcZCnFJY2HY"
+
+    [peers.1]
+    name = "node1"
+    pkey = "CsaBDspnmV7B281LR3GMNvZygUGg23wREWrziAbLZSWU"
+
+    [peers.2]
+    name = "node2"
+    pkey = "7TsL4ALD6eM4HiacqXZYxNYH2aCdU6hVSCX8RLqzPKXH"
+
+    [peers.3]
+    name = "node3"
+    pkey = "GoJ6vqxdTGZucaaZP268oV5pcu8BMpHiUupfwpgk68MP"

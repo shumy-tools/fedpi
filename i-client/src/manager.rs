@@ -10,7 +10,7 @@ use bincode::{serialize, deserialize};
 
 use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder};
 use core_fpi::ids::*;
-use core_fpi::messages::Message;
+use core_fpi::messages::Transaction;
 
 fn select(sid: &str, typ: SType) -> String {
     match typ {
@@ -95,7 +95,7 @@ impl Storage {
 //-----------------------------------------------------------------------------------------------------------
 // SubjectManager
 //-----------------------------------------------------------------------------------------------------------
-pub struct SubjectManager<F> where F: Fn(Message) -> Result<()> {
+pub struct SubjectManager<F> where F: Fn(Transaction) -> Result<()> {
     pub sid: String,
 
     pub upd: Option<MySubject>,
@@ -105,7 +105,7 @@ pub struct SubjectManager<F> where F: Fn(Message) -> Result<()> {
     sync: F
 }
 
-impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
+impl<F: Fn(Transaction) -> Result<()>> SubjectManager<F> {
     pub fn new(sid: &str, sync: F) -> Self {
         let res = Storage::load(sid);
         Self { sid: sid.into(), upd: res.0, mrg: res.1, sto: res.2, sync: sync }
@@ -203,7 +203,7 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
         self.upd = Some(update);
 
         // process sync message
-        (self.sync)(Message::SyncSubject(subject.clone()))?;
+        (self.sync)(Transaction::SyncSubject(subject.clone()))?;
 
         // merge with existent
         let merged = match self.sto.take() {
@@ -230,12 +230,23 @@ impl<F: Fn(Message) -> Result<()>> SubjectManager<F> {
 //-----------------------------------------------------------------------------------------------------------
 // MySubject
 //-----------------------------------------------------------------------------------------------------------
+use clear_on_drop::clear::Clear;
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MySubject {
     secret: Scalar,                                 // current subject-key secret
     profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
 
     subject: Subject
+}
+
+impl Drop for MySubject {
+    fn drop(&mut self) {
+        self.secret.clear();
+        for item in self.profile_secrets.iter_mut() {
+            item.1.clear();
+        }
+    }
 }
 
 impl Debug for MySubject {
