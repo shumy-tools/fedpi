@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::IndSignature;
-use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, CompressedRistretto};
+use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
@@ -34,12 +34,12 @@ impl Subject {
     }
 
     pub fn evolve(&self, sig_s: Scalar) -> (Scalar, SubjectKey) {
-        let sig_key = (sig_s * G).compress();
+        let sig_key = sig_s * G;
         match self.keys.last() {
             None => (sig_s, SubjectKey::new(&self.sid, 0, sig_key, &sig_s, &sig_key)),
             Some(active) => {
                 let secret = rnd_scalar();
-                let skey = (secret * G).compress();
+                let skey = secret * G;
                 (secret, SubjectKey::new(&self.sid, active.sig.index + 1, skey, &sig_s, &sig_key))
             }
         }
@@ -150,7 +150,7 @@ impl Subject {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SubjectKey {
-    pub key: CompressedRistretto,                   // The public key
+    pub key: RistrettoPoint,                        // The public key
     pub sig: IndSignature,                          // Signature from the previous key (if exists) for (sid, index, key)
     #[serde(skip)] _phantom: () // force use of constructor
 }
@@ -165,23 +165,31 @@ impl Debug for SubjectKey {
 }
 
 impl SubjectKey {
-    pub fn new(sid: &str, index: usize, skey: CompressedRistretto, sig_s: &Scalar, sig_key: &CompressedRistretto) -> Self {
-        let data = &[sid.as_bytes(), &index.to_be_bytes(), skey.as_bytes()];
-        let sig = IndSignature::sign(index, sig_s, sig_key, data);
+    pub fn new(sid: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &RistrettoPoint) -> Self {
+        let sig_data = Self::data(sid, &index, &skey);
+        let sig = IndSignature::sign(index, sig_s, sig_key, &sig_data);
         
         Self { key: skey, sig: sig, _phantom: () }
     }
 
     fn check(&self, sid: &str, sig_key: &SubjectKey) -> Result<()> {
-        let index = self.sig.index;
-        let index_bytes = index.to_be_bytes();
-
-        let data = &[sid.as_bytes(), &index_bytes, self.key.as_bytes()];
-        if !self.sig.verify(&sig_key.key, data) {
+        let sig_data = Self::data(sid, &self.sig.index, &self.key);
+        if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid subject-key signature!")
         }
 
         Ok(())
+    }
+
+    fn data(sid: &str, index: &usize, key: &RistrettoPoint) -> [Vec<u8>; 3] {
+        let c_key = key.compress();
+
+        // These unwrap() should never fail, or it's a serious code bug!
+        let b_sid = bincode::serialize(sid).unwrap();
+        let b_index = bincode::serialize(index).unwrap();
+        let b_key = bincode::serialize(&c_key).unwrap();
+
+        [b_sid, b_index, b_key]
     }
 }
 
@@ -223,7 +231,7 @@ impl Profile {
 
     pub fn evolve(&self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileKey) {
         let secret = rnd_scalar();
-        let key = (secret * G).compress();
+        let key = secret * G;
 
         let pkey = match self.chain.last() {
             None => ProfileKey::new(sid, &self.typ, &self.lurl, 0, key, sig_s, sig_key),
@@ -274,7 +282,7 @@ impl Profile {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ProfileKey {
     pub index: usize,                       // Profile key index on the vector
-    pub key: CompressedRistretto,           // The profile public key
+    pub key: RistrettoPoint,                // The profile public key
     pub sig: IndSignature,                  // Subject signature for (sid, typ, lurl, index, key)
     #[serde(skip)] _phantom: () // force use of constructor
 }
@@ -290,20 +298,33 @@ impl Debug for ProfileKey {
 }
 
 impl ProfileKey {
-    pub fn new(sid: &str, typ: &str, lurl: &str, index: usize, skey: CompressedRistretto, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let data = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), &index.to_be_bytes(), skey.as_bytes()];
-        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, data);
+    pub fn new(sid: &str, typ: &str, lurl: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let sig_data = Self::data(sid, typ, lurl, &index, &skey);
+        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
         Self { index: index, key: skey, sig: sig, _phantom: () }
     }
 
     fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
-        let data = &[sid.as_bytes(), typ.as_bytes(), lurl.as_bytes(), &self.index.to_be_bytes(), self.key.as_bytes()];
-        if !self.sig.verify(&sig_key.key, data) {
+        let sig_data = Self::data(sid, typ, lurl, &self.index, &self.key);
+        if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid profile-key signature!")
         }
 
         Ok(())
+    }
+
+    fn data(sid: &str, typ: &str, lurl: &str, index: &usize, key: &RistrettoPoint) -> [Vec<u8>; 5] {
+        let c_key = key.compress();
+
+        // These unwrap() should never fail, or it's a serious code bug!
+        let b_sid = bincode::serialize(sid).unwrap();
+        let b_typ = bincode::serialize(typ).unwrap();
+        let b_lurl = bincode::serialize(lurl).unwrap();
+        let b_index = bincode::serialize(index).unwrap();
+        let b_key = bincode::serialize(&c_key).unwrap();
+
+        [b_sid, b_typ, b_lurl, b_index, b_key]
     }
 }
 
@@ -385,7 +406,7 @@ mod tests {
     #[test]
     fn test_incorrect_construction() {
         let sig_s1 = rnd_scalar();
-        let sig_key1 = (sig_s1 * G).compress();
+        let sig_key1 = sig_s1 * G;
         let sid = "s-id:shumy";
 
         let mut new1 = Subject::new(sid);
@@ -413,7 +434,7 @@ mod tests {
         // Evolving SubjectKey
         // -------------------------------------------------
         let sig_s2 = rnd_scalar();
-        let sig_key2 = (sig_s2 * G).compress();
+        let sig_key2 = sig_s2 * G;
 
         // try to evolve with wrong index and self-signed!
         let skey2 = SubjectKey::new(sid, 0, sig_key2, &sig_s1, &sig_key1);

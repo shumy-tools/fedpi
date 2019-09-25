@@ -6,6 +6,7 @@ use sha2::{Sha512, Digest};
 use core_fpi::{rnd_scalar, G, Result, KeyEncoder, Scalar, RistrettoPoint};
 use core_fpi::shares::*;
 use core_fpi::ids::*;
+use core_fpi::signatures::*;
 use core_fpi::messages::*;
 
 use crate::config::Config;
@@ -14,7 +15,7 @@ pub struct Processor {
     config: Config,
     subjects: HashMap<String, Subject>,
 
-    negotiation: Option<Negotiation>
+    negotiation: Option<KeyResponse>
 }
 
 impl Processor {
@@ -22,25 +23,28 @@ impl Processor {
         Self { config: config, subjects: HashMap::new(), negotiation: None }
     }
 
-    pub fn request(&mut self, data: &[u8]) -> Result<()> {
+    pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg: Request = decode(data)?;
         match msg {
             Request::NegotiateMasterKey(negotiation) => {
-                // TODO: verify if client has authorization to fire negotiation
+                // TODO: verify if the client has authorization to fire negotiation
 
                 if let Some(neg) = &self.negotiation {
                     if neg.session == negotiation.session {
-                        // TODO: return the same response
-                        return Ok(())
+                        let msg = Response::NegotiateMasterKey(neg.clone());
+                        return encode(&msg)
                     }
                 }
 
-                let keys = self.derive_negotiation_keys(negotiation);
+                let keys = self.derive_negotiation_keys(&negotiation);
                 let shares = self.derive_encrypted_shares(&keys.0);
 
-                //TODO: NegotiationResult Signed(self.config.peers, shares) / (ordered peer's list, encrypted shares, Feldman's Coefficients)
-
-                Ok(())
+                // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
+                let neg = KeyResponse::sign(&negotiation.session, self.config.peers.iter().map(|p| p.pkey).collect(), shares.0, shares.1, &self.config.secret, &self.config.pkey);
+                self.negotiation = Some(neg.clone());
+                
+                let msg = Response::NegotiateMasterKey(neg);
+                encode(&msg)
             }
         }
     }
@@ -67,7 +71,7 @@ impl Processor {
         }
     }
 
-    fn derive_negotiation_keys(&self, neg: Negotiation) -> (Vec::<Scalar>, Vec::<RistrettoPoint>) {
+    fn derive_negotiation_keys(&self, neg: &KeyRequest) -> (Vec::<Scalar>, Vec::<RistrettoPoint>) {
         let secret = self.config.secret;
 
         let mut private_keys = Vec::<Scalar>::with_capacity(self.config.peers.len());

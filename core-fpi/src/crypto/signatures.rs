@@ -4,12 +4,9 @@ use serde::{Serialize, Deserialize};
 use serde::ser::Serializer;
 use serde::de::{Deserializer, Error};
 
-use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
-use curve25519_dalek::scalar::Scalar;
-
 use sha2::{Sha512, Digest};
 
-use crate::{G, KeyEncoder};
+use crate::{G, Scalar, RistrettoPoint, KeyEncoder};
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature
@@ -63,7 +60,7 @@ impl<'de> Deserialize<'de> for Signature {
 
 impl Signature {
     #[allow(non_snake_case)]
-    pub fn sign(s: &Scalar, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[&[u8]]) -> Self {
+    pub fn sign(s: &Scalar, P: &RistrettoPoint, BasePoint: &RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let mut hasher = Sha512::new()
             .chain(s.as_bytes());
         
@@ -75,7 +72,7 @@ impl Signature {
         let M = (m * BasePoint).compress();
 
         let mut hasher = Sha512::new()
-            .chain(P.as_bytes())
+            .chain(P.compress().as_bytes())
             .chain(M.as_bytes());
         
         for d in data {
@@ -93,16 +90,11 @@ impl Signature {
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, P: &CompressedRistretto, BasePoint: &RistrettoPoint, data: &[&[u8]]) -> bool {
-        let Ps = P.decompress();
-        if Ps.is_none() {
-            return false;
-        }
-
-        let M = self.c * Ps.unwrap() + self.p * BasePoint;
+    pub fn verify(&self, P: &RistrettoPoint, BasePoint: &RistrettoPoint, data: &[Vec<u8>]) -> bool {
+        let M = self.c * P + self.p * BasePoint;
 
         let mut hasher = Sha512::new()
-            .chain(P.as_bytes())
+            .chain(P.compress().as_bytes())
             .chain(M.compress().as_bytes());
         
         for d in data {
@@ -113,10 +105,6 @@ impl Signature {
 
         c == self.c
     }
-
-    /*pub fn decode(value: &str) -> Result<Signature, &'static str> {
-        let decoded = bs58::decode(value).into_vec().map_err(|_| "Invalid base58 signature string!")?;
-    }*/
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -125,7 +113,7 @@ impl Signature {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExtSignature {
     pub sig: Signature,
-    pub key: CompressedRistretto
+    pub key: RistrettoPoint
 }
 
 impl Debug for ExtSignature {
@@ -139,20 +127,15 @@ impl Debug for ExtSignature {
 
 impl ExtSignature {
     #[allow(non_snake_case)]
-    pub fn sign(s: &Scalar, key: CompressedRistretto, data: &[&[u8]]) -> Self {
+    pub fn sign(s: &Scalar, key: RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, &key, &G, data);
-        Self {  sig: sig, key: key }
+        Self { sig: sig, key: key }
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, data: &[&[u8]]) -> bool {
+    pub fn verify(&self, data: &[Vec<u8>]) -> bool {
         self.sig.verify(&self.key, &G, data)
     }
-
-    /*pub fn to_bytes(&self) -> Vec<u8> {
-        let data: &[&[u8]] = &[self.key.as_bytes(), self.sig.c.as_bytes(), self.sig.p.as_bytes()];
-        data.concat()
-    }*/
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -165,21 +148,15 @@ pub struct IndSignature {
 }
 
 impl IndSignature {
-    pub fn sign(index: usize, s: &Scalar, key: &CompressedRistretto, data: &[&[u8]]) -> Self {
+    pub fn sign(index: usize, s: &Scalar, key: &RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, key, &G, data);
         Self { index: index, sig: sig }
     }
 
     #[allow(non_snake_case)]
-    pub fn verify(&self, key: &CompressedRistretto, data: &[&[u8]]) -> bool {
+    pub fn verify(&self, key: &RistrettoPoint, data: &[Vec<u8>]) -> bool {
         self.sig.verify(&key, &G, data)
     }
-
-    /*pub fn to_bytes(&self) -> Vec<u8> {
-        let index_bytes = self.index.to_be_bytes();
-        let data: &[&[u8]] = &[&index_bytes, self.sig.c.as_bytes(), self.sig.p.as_bytes()];
-        data.concat()
-    }*/
 }
 
 #[cfg(test)]
@@ -191,12 +168,12 @@ mod tests {
     #[test]
     fn test_correct() {
         let a = rnd_scalar();
-        let Pa = (a * G).compress();
+        let Pa = a * G;
 
         let d0 = rnd_scalar();
         let d1 = rnd_scalar();
 
-        let data: &[&[u8]] = &[d0.as_bytes(), d1.as_bytes()];
+        let data = &[d0.to_bytes().to_vec(), d1.to_bytes().to_vec()];
         let sig = ExtSignature::sign(&a, Pa, data);
         
         assert!(sig.verify(data) == true);
@@ -206,16 +183,16 @@ mod tests {
     #[test]
     fn test_incorrect() {
         let a = rnd_scalar();
-        let Pa = (a * G).compress();
+        let Pa = a * G;
 
         let d0 = rnd_scalar();
         let d1 = rnd_scalar();
         let d2 = rnd_scalar();
         
-        let data1: &[&[u8]] = &[d0.as_bytes(), d1.as_bytes()];
+        let data1 = &[d0.to_bytes().to_vec(), d1.to_bytes().to_vec()];
         let sig = ExtSignature::sign(&a, Pa, data1);
         
-        let data2: &[&[u8]] = &[d0.as_bytes(), d2.as_bytes()];
+        let data2 = &[d0.to_bytes().to_vec(), d2.to_bytes().to_vec()];
         assert!(sig.verify(data2) == false);
     }
 }

@@ -122,7 +122,7 @@ impl<F: Fn(Transaction) -> Result<()>> SubjectManager<F> {
         }
 
         let secret = rnd_scalar();
-        let skey = (secret * G).compress();
+        let skey = secret * G;
 
         let mut sub = Subject::new(&self.sid);
         sub.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));

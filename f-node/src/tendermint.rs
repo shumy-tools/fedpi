@@ -28,10 +28,13 @@ impl abci::Application for NodeApp {
             }
         };
 
-        if let Err(err) = self.processor.request(&msg) {
-            error!("Query ({:?})", err);
-            resp.set_code(1);
-            resp.set_log(err.into());
+        match self.processor.request(&msg) {
+            Ok(data) => resp.set_value(data),
+            Err(err) => {
+                error!("Query ({:?})", err);
+                resp.set_code(1);
+                resp.set_log(err.into());
+            }
         }
         
         resp

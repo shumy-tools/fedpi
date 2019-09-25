@@ -262,7 +262,7 @@ impl Degree for Polynomial {
 // RistrettoPolynomial
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RistrettoPolynomial {
     pub A: Vec<RistrettoPoint>
 }
