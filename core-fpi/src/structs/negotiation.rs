@@ -173,6 +173,37 @@ impl MasterKey {
 
         Ok(Self { session: session.into(), matrix: matrix, votes: votes, _phantom: () })
     }
+
+    pub fn check(&self, peers: &[RistrettoPoint]) -> Result<()> {
+        let n = peers.len();
+        if self.votes.len() != n {
+            return Err("Expecting votes from all peers!")
+        }
+
+        // check matrix bounds before use
+        self.matrix.check(n)?;
+
+        // reconstruct each KeyResponse and check
+        // TODO: optimize to avoid clones!
+        for i in 0..n {
+            let item = &self.votes[i];
+
+            let resp = KeyResponse {
+                session: self.session.clone(),
+                peers: peers.to_vec(),
+                
+                shares: item.shares.clone(),
+                pkeys: self.matrix.expand(n, i),
+                commit: item.commit.clone(),
+
+                sig: item.sig.clone()
+            };
+
+            resp.check(&self.session, peers)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -191,24 +222,56 @@ impl PublicMatrix {
     fn create(res: &[KeyResponse]) -> Result<Self> {
         let n = res.len();
 
-        let mut matrix = Vec::<Vec<RistrettoPoint>>::with_capacity(n-1);
+        let mut matrix = Vec::<Vec<RistrettoPoint>>::with_capacity(n);
         for i in 0..n {
-            let mut line = Vec::<RistrettoPoint>::with_capacity(n-i-1);
+            let mut line = Vec::<RistrettoPoint>::with_capacity(n-i);
             for j in 0..n {
                 if res[i].pkeys[j] != res[j].pkeys[i] {
                     return Err("Expecting a symmetric public-matrix!")
                 }
 
-                if j > i {
+                if j >= i {
                     line.push(res[i].pkeys[j]);
                 }
             }
 
-            if i < n-1 {
-                matrix.push(line);
-            }
+            matrix.push(line);
         }
 
         Ok(Self { triangle: matrix })
+    }
+
+    fn check(&self, length: usize) -> Result<()> {
+        if self.triangle.len() != length {
+            return Err("MasterKey matrix of incorrect size!")
+        }
+
+        // check if it's a triangular matrix
+        for i in 0..length {
+            if self.triangle[i].len() != length - i {
+                return Err("MasterKey matrix with incorrect triangle!")
+            }
+        }
+
+        Ok(())
+    }
+
+    fn expand(&self, length: usize, index: usize) -> Vec<RistrettoPoint> {
+        let mut pkeys = Vec::<RistrettoPoint>::with_capacity(length);
+        for j in 0..index {
+            // (requires [index-j] instead fo [index]). The matrix is shifted left due to the lack of items
+            let replicated = self.triangle[j][index-j];
+            pkeys.push(replicated);
+        }
+
+        pkeys.extend(&self.triangle[index]);
+        
+        /*print!("L{} {}:", length, index);
+        for k in pkeys.iter() {
+            print!(" {}", k.encode());
+        }
+        println!("");*/
+
+        pkeys
     }
 }

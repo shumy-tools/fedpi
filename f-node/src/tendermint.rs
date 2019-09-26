@@ -55,7 +55,7 @@ impl abci::Application for NodeApp {
             }
         };
 
-        if let Err(err) = self.processor.validate(&msg) {
+        if let Err(err) = self.processor.check(&msg) {
             error!("CheckTx ({:?})", err);
             resp.set_code(1);
             resp.set_log(err.into());

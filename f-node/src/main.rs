@@ -9,6 +9,7 @@ use log::info;
 use log::Level::{Info, Warn, Error};
 
 mod config;
+mod handlers;
 mod processor;
 mod tendermint;
 

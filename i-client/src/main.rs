@@ -67,8 +67,12 @@ fn main() {
         let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to commit to network!"))?;
         let res: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 
-        if res.result.check_tx.code != 0 || res.result.deliver_tx.code != 0 {
-            return Err(Error::new(ErrorKind::Other, "Tx error from network!"))
+        if res.result.check_tx.code != 0 {
+            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On check: {}", res.result.check_tx.log)))
+        }
+
+        if res.result.deliver_tx.code != 0 {
+            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On deliver: {}", res.result.deliver_tx.log)))
         }
 
         Ok(())
