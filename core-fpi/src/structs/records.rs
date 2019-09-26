@@ -71,6 +71,16 @@ impl Record {
     }
 }
 
+//--------------------------------------------------------------------
+// NewRecord
+//--------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NewRecord {
+    pub record: Record,
+    pub key: RistrettoPoint,
+    pub base: RistrettoPoint
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

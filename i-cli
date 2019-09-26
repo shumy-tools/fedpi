@@ -1,2 +1,2 @@
 #!/bin/bash
-./target/release/i-client --host "localhost:26660" --sid "shumy" "$@"
+./target/release/i-client --home ./i-client --sid "shumy" "$@"

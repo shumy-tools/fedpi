@@ -5,8 +5,8 @@ use clap::{Arg, App};
 
 use env_logger::fmt::Color;
 
+use log::info;
 use log::Level::{Info, Warn, Error};
-use log::{info, LevelFilter};
 
 mod config;
 mod processor;
@@ -19,18 +19,6 @@ fn main() {
         .version(VERSION)
         .about("The official FedPI Node implementation.")
         .author("Micael Pedrosa <micaelpedrosa@ua.pt>")
-        .arg(Arg::with_name("name")
-            .help("Set the node name.")
-            .required(true)
-            .short("n")
-            .long("name")
-            .takes_value(true))
-        .arg(Arg::with_name("port")
-            .help("Set the port number, default to 26658")
-            .required(false)
-            .short("p")
-            .long("port")
-            .takes_value(true))
         .arg(Arg::with_name("home")
             .help("Set the node-app config directory.")
             .required(false)
@@ -39,17 +27,16 @@ fn main() {
             .takes_value(true))
         .get_matches();
     
-    let name = matches.value_of("name").unwrap().to_owned();
-    let home = matches.value_of("home").unwrap_or("./");
-    
-    let port: usize = match matches.value_of("port") {
-        None => 26658,
-        Some(str_port) => str_port.trim().parse::<usize>().unwrap()
-    };
+    let home = matches.value_of("home").unwrap_or(".");
+    let home = if home.ends_with("/") { &home[..home.len()-1] } else { home };
 
-    let addr = format!("127.0.0.1:{}", port).parse().unwrap();
+    // read configuration from HOME/config/app.config.toml file
+    let cfg = config::Config::new(&home);
+
+    let addr = format!("127.0.0.1:{}", cfg.port).parse().unwrap();
 
     // config logger
+    let cfg_clone = cfg.clone();
     env_logger::builder()
         .format(move |buf, record| {
             let mut style = buf.style();
@@ -62,18 +49,14 @@ fn main() {
                 _ => &style /* do nothing */
             };
             
-            writeln!(buf, "[{} - {} {}] {}", &name, buf.timestamp(), style.value(record.level()), record.args())
+            writeln!(buf, "[{} - {} {}] {}", &cfg_clone.name, buf.timestamp(), style.value(record.level()), record.args())
         })
-        .filter(None, LevelFilter::Info)
+        .filter(None, cfg.log)
         .init();
 
-    // read configuration from HOME/config/app.config.toml file
-    let cfg = config::Config::new(&home);
+    info!("Initializing FedPI Node (Tendermint) at port: {}", cfg.port);
 
     // init message processor (generic processor that doesn't depend on tendermint)
     let prc = processor::Processor::new(cfg);
-
-    // default to tendermint (it may change in the future)
-    info!("Initializing FedPI Node (Tendermint) at port: {}", port);
     abci::run(addr, tendermint::NodeApp { processor: prc });
 }

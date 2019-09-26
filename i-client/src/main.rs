@@ -6,7 +6,10 @@ use core_fpi::messages::*;
 
 use serde::Deserialize;
 
+mod config;
 mod manager;
+
+use config::Peer;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -15,10 +18,10 @@ fn main() {
         .version(VERSION)
         .about("The official FedPI CLI implementation.")
         .author("Micael Pedrosa <micaelpedrosa@ua.pt>")
-        .arg(Arg::with_name("host")
-            .help("Set the host:port for the request")
-            .required(true)
-            .long("host")
+        .arg(Arg::with_name("home")
+            .help("Set the app config directory.")
+            .required(false)
+            .long("home")
             .takes_value(true))
         .arg(Arg::with_name("sid")
             .help("Select the subject-id and respective store")
@@ -47,19 +50,23 @@ fn main() {
             .about("Fires the negotiation protocol to create a master key"))
         .get_matches();
     
-    let host = matches.value_of("host").unwrap().to_owned();
+    let home = matches.value_of("home").unwrap_or(".");
+    let home = if home.ends_with("/") { &home[..home.len()-1] } else { home };
+
+    // read configuration from HOME/config/app.config.toml file
+    let cfg = config::Config::new(&home);
+
     let sid = matches.value_of("sid").unwrap().to_owned();
 
-    let tx_handler = |msg: Transaction| -> Result<()> {
+    let tx_handler = |peer: &Peer, msg: Transaction| -> Result<()> {
         let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
         let data = bs58::encode(&msg_data).into_string();
 
-        let url = format!("http://{}/broadcast_tx_commit?tx={:?}", host, data);
+        let url = format!("{}/broadcast_tx_commit?tx={:?}", peer.host, data);
         
-        let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
+        let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to commit to network!"))?;
         let res: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 
-        println!("{:#?}", res);        
         if res.result.check_tx.code != 0 || res.result.deliver_tx.code != 0 {
             return Err(Error::new(ErrorKind::Other, "Tx error from network!"))
         }
@@ -67,27 +74,30 @@ fn main() {
         Ok(())
     };
 
-    let query_handler = |msg: Request| -> Result<Response> {
+    let query_handler = |peer: &Peer, msg: Request| -> Result<Response> {
         let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
         let data = bs58::encode(&msg_data).into_string();
 
-        let url = format!("http://{}/abci_query?data={:?}", host, data);
+        let url = format!("{}/abci_query?data={:?}", peer.host, data);
 
-        let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to sync with network!"))?;
+        let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to query network!"))?;
         let res: QueryResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 
-        println!("{:#?}", res);        
         if res.result.response.code != 0 {
-            return Err(Error::new(ErrorKind::Other, "Query error from network!"))
+            return Err(Error::new(ErrorKind::Other, format!("Query error from network: {}", res.result.response.log)))
         }
-        
-        let data = base64::decode(&res.result.response.value).map_err(|_| Error::new(ErrorKind::Other, "Unable to decode base64!"))?;
+
+        // expect value if code == 0
+        let value = res.result.response.value.unwrap();
+
+        let data = base64::decode(&value).map_err(|_| Error::new(ErrorKind::Other, "Unable to decode base64!"))?;
         let response: Response = core_fpi::messages::decode(data.as_ref()).map_err(|_| Error::new(ErrorKind::Other, "Unable to decode message!"))?;
 
         Ok(response)
     };
 
-    let mut sm = manager::SubjectManager::new(&sid, tx_handler, query_handler);
+    // tx_handler and query_handler are tendermint adaptors. The SubjectManager is independent of the used blockchain technology.
+    let mut sm = manager::SubjectManager::new(home, &sid, cfg, tx_handler, query_handler);
 
     if matches.is_present("reset") {
         println!("Reseting {:?}", sid);
@@ -95,22 +105,23 @@ fn main() {
     } else if matches.is_present("view") {
         println!("{:#?}", sm.sto);
     } else if matches.is_present("create") {
-        sm.create().unwrap();
+        if let Err(e) = sm.create() {
+            println!("ERROR -> {}", e);
+        }
     } else if matches.is_present("evolve") {
         sm.evolve().unwrap();
     } else if matches.is_present("profile") {
         let matches = matches.subcommand_matches("profile").unwrap();
         let typ = matches.value_of("type").unwrap().to_owned();
         let lurl = matches.value_of("lurl").unwrap().to_owned();
-        sm.profile(&typ, &lurl).unwrap();
-    } else if matches.is_present("negotiate-key") {
-        sm.negotiate().unwrap();
-    } else {
-        let url = format!("http://{}/status", host);
         
-        println!("GET {}", url);
-        let resp = reqwest::get(url.as_str()).unwrap();
-        println!("{:#?}", resp);
+        if let Err(e) = sm.profile(&typ, &lurl) {
+            println!("ERROR -> {}", e);
+        }
+    } else if matches.is_present("negotiate-key") {
+        if let Err(e) = sm.negotiate() {
+            println!("ERROR -> {}", e);
+        }
     }
 }
 
@@ -162,7 +173,7 @@ struct QueryResultBody {
 struct QueryResultResponse {
     code: i32,
     log: String,
-    value: String
+    value: Option<String>
 }
 
 /*{

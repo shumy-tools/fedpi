@@ -156,7 +156,7 @@ pub trait Reconstruct<S> {
 
 pub trait Evaluate {
     type Output;
-    fn evaluate(&self, x: Scalar) -> Self::Output;
+    fn evaluate(&self, x: &Scalar) -> Self::Output;
 }
 
 pub trait Degree {
@@ -217,7 +217,7 @@ impl Polynomial {
         let mut shares = Vec::<Share>::with_capacity(n);
         for j in 1..n + 1 {
             let x = Scalar::from(j as u64);
-            let share = Share { i: j as u32, yi: self.evaluate(x) };
+            let share = Share { i: j as u32, yi: self.evaluate(&x) };
             shares.push(share);
         }
 
@@ -228,7 +228,7 @@ impl Polynomial {
 impl Evaluate for Polynomial {
     type Output = Scalar;
     
-    fn evaluate(&self, x: Scalar) -> Scalar {
+    fn evaluate(&self, x: &Scalar) -> Scalar {
         // evaluate using Horner's rule
         let mut rev = self.a.iter().rev();
         let head = *rev.next().unwrap();
@@ -307,16 +307,16 @@ impl<'a, 'b> Mul<&'b Scalar> for &'a RistrettoPolynomial {
 }
 
 impl RistrettoPolynomial {
-    pub fn verify(&self, share: RistrettoShare) -> bool {
+    pub fn verify(&self, share: &RistrettoShare) -> bool {
         let x = Scalar::from(share.i as u64);
-        share.Yi == self.evaluate(x)
+        share.Yi == self.evaluate(&x)
     }
 }
 
 impl Evaluate for RistrettoPolynomial {
     type Output = RistrettoPoint;
     
-    fn evaluate(&self, x: Scalar) -> RistrettoPoint {
+    fn evaluate(&self, x: &Scalar) -> RistrettoPoint {
         // evaluate using Horner's rule
         let mut rev = self.A.iter().rev();
         let head = *rev.next().unwrap();

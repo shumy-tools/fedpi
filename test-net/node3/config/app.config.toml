@@ -1,6 +1,12 @@
+name = "node3"                                              # Set the name of the node here
 secret = "49b965VRKbkmk8nS98HYPkMhyyRPvCTWsBk1grW31zP8"     # Scalar
 pkey = "GoJ6vqxdTGZucaaZP268oV5pcu8BMpHiUupfwpgk68MP"       # CompressedRistretto point
-threshold = 1                                               # where #peers >= 3 * t
+
+threshold = 1                                               # Number of permitted failing nodes, where #peers >= 3 * t
+port = 26653                                                # Set the service port for tendermint
+
+log = "info"                                                # Set the log level
+mng_key = "HjnGnJFDVcPWk9BcwBLE5yrdgw7gzGpieqiZ1paYdpqD"    # Set the management key authorized for negotiations
 
 # List of valid peers
 [peers]

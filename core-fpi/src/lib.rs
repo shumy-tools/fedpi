@@ -22,6 +22,12 @@ pub const CLOSE: &str = "CLOSE";
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 
+/*impl From<&'static str> for std::io::Error {
+    fn from(msg: &'static str) -> Self {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("{}", msg))
+    }
+}*/
+
 pub fn rnd_scalar() -> Scalar {
     let mut csprng: OsRng = OsRng::new().unwrap();
     Scalar::random(&mut csprng)

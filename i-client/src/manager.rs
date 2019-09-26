@@ -8,15 +8,18 @@ use std::io::prelude::*;
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 
-use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder};
+use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::messages::*;
+use core_fpi::negotiation::*;
 
-fn select(sid: &str, typ: SType) -> String {
+use crate::config::{Peer, Config};
+
+fn select(home: &str, sid: &str, typ: SType) -> String {
     match typ {
-        SType::Updating => format!("{}.upd", sid),
-        SType::Merged => format!("{}.mrg", sid),
-        SType::Stored => format!("{}.sto", sid),
+        SType::Updating => format!("{}/{}.upd", home, sid),
+        SType::Merged => format!("{}/{}.mrg", home, sid),
+        SType::Stored => format!("{}/{}.sto", home, sid),
     }
 }
 
@@ -56,10 +59,10 @@ enum SType { Updating, Merged, Stored }
 struct Storage {}
 
 impl Storage {
-    fn load(sid: &str) -> (Option<MySubject>, Option<MySubject>, Option<MySubject>) {
-        let upd_data = read(&select(sid, SType::Updating));
-        let mrg_data = read(&select(sid, SType::Merged));
-        let sto_data = read(&select(sid, SType::Stored));
+    fn load(home: &str, sid: &str) -> (Option<MySubject>, Option<MySubject>, Option<MySubject>) {
+        let upd_data = read(&select(home, sid, SType::Updating));
+        let mrg_data = read(&select(home, sid, SType::Merged));
+        let sto_data = read(&select(home, sid, SType::Stored));
 
         // read what you can and ignore the rest
         let upd: Option<MySubject> = match upd_data { None => None, Some(data) => deserialize(&data).ok() };
@@ -69,22 +72,22 @@ impl Storage {
         (upd, mrg, sto)
     }
 
-    fn store(sid: &str, typ: SType, my: &MySubject) -> Result<()> {
+    fn store(home: &str, sid: &str, typ: SType, my: &MySubject) -> Result<()> {
         let data = serialize(&my).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode subject!"))?;
-        let file = select(sid, typ);
+        let file = select(home, sid, typ);
 
         write(&file, data)
     }
 
-    fn reset(sid: &str) {
-        Storage::clean(sid);
-        let sto = select(sid, SType::Stored);
+    fn reset(home: &str, sid: &str) {
+        Storage::clean(home, sid);
+        let sto = select(home, sid, SType::Stored);
         remove_file(&sto).ok();
     }
 
-    fn clean(sid: &str) {
-        let upd = select(sid, SType::Updating);
-        let mrg = select(sid, SType::Merged);
+    fn clean(home: &str, sid: &str) {
+        let upd = select(home, sid, SType::Updating);
+        let mrg = select(home, sid, SType::Merged);
 
         // nothing to do if it can't remove
         remove_file(&upd).ok();
@@ -95,25 +98,27 @@ impl Storage {
 //-----------------------------------------------------------------------------------------------------------
 // SubjectManager
 //-----------------------------------------------------------------------------------------------------------
-pub struct SubjectManager<F, Q> where F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response> {
+pub struct SubjectManager<F, Q> where F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response> {
+    pub home: String,
     pub sid: String,
+    pub config: Config,
 
     pub upd: Option<MySubject>,
     pub mrg: Option<MySubject>,
     pub sto: Option<MySubject>,
 
-    sync: F,
+    commit: F,
     query: Q
 }
 
-impl<F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response>> SubjectManager<F, Q> {
-    pub fn new(sid: &str, sync: F, query: Q) -> Self {
-        let res = Storage::load(sid);
-        Self { sid: sid.into(), upd: res.0, mrg: res.1, sto: res.2, sync: sync, query: query }
+impl<F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response>> SubjectManager<F, Q> {
+    pub fn new(home: &str, sid: &str, cfg: Config, commit: F, query: Q) -> Self {
+        let res = Storage::load(home, sid);
+        Self { home: home.into(), sid: sid.into(), config: cfg, upd: res.0, mrg: res.1, sto: res.2, commit: commit, query: query }
     }
 
     pub fn reset(&mut self) {
-        Storage::reset(&self.sid);
+        Storage::reset(&self.home, &self.sid);
     }
 
     pub fn create(&mut self) -> Result<()> {
@@ -181,15 +186,46 @@ impl<F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response>> Subje
     }
 
     pub fn negotiate(&mut self) -> Result<()> {
-        let secret = rnd_scalar();
-        let key = secret * G;
+        let session = uuid();
+        let n = self.config.peers.len();
+        let req = KeyRequest::sign(&session, &self.config.secret, self.config.pkey);
 
-        let req = KeyRequest::sign(uuid().as_ref(), &secret, key);
-        let res = (self.query)(Request::NegotiateMasterKey(req));
+        // set the results in ordered fashion
+        let mut results = Vec::<KeyResponse>::with_capacity(n);
+        for peer in self.config.peers.iter() {
+            let res = (self.query)(peer, Request::NegotiateKey(req.clone()))?;
+            match res {
+                Response::NegotiateKey(res) => {
+                    if let Some(_) = results.get(res.sig.index) {
+                        // TODO: replace this with ignore or retry strategy?
+                        return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
+                    }
+                    
+                    if res.sig.index > n-1 {
+                        // TODO: replace this with ignore or retry strategy?
+                        return Err(Error::new(ErrorKind::Other, "Unexpected peer index on key negotiation!"))
+                    }
 
-        println!("RESP: {:#?}", res);
+                    results.insert(res.sig.index, res);
+                }//,
+                //_=> return Err(Error::new(ErrorKind::Other, "Unexpected response for negotiation!"))
+            }
+        }
 
-        Ok(())
+        // If all is OK, create MasterKey to commit
+        let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
+        let mk = MasterKey::create(&session, &peer_keys, results)
+            .map_err(|e| Error::new(ErrorKind::Other, format!("{}", e)))?;
+
+        // select a random peer
+        use rand::seq::SliceRandom;
+        let selection = self.config.peers.choose(&mut rand::thread_rng());
+
+        // process master-key commit
+        match selection {
+            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
+            Some(sel) => (self.commit)(&sel, Transaction::CommitKey(mk))
+        }
     }
 
     fn check_pending(&self) -> Result<()> {
@@ -212,11 +248,18 @@ impl<F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response>> Subje
         let subject = update.subject.clone();
         let sid = subject.sid.clone();
 
-        Storage::store(&self.sid, SType::Updating, &update)?;
+        Storage::store(&self.home, &self.sid, SType::Updating, &update)?;
         self.upd = Some(update);
 
+        // select a random peer
+        use rand::seq::SliceRandom;
+        let selection = self.config.peers.choose(&mut rand::thread_rng());
+
         // process sync message
-        (self.sync)(Transaction::SyncSubject(subject.clone()))?;
+        match selection {
+            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
+            Some(sel) => (self.commit)(&sel, Transaction::SyncSubject(subject.clone()))?
+        }
 
         // merge with existent
         let merged = match self.sto.take() {
@@ -226,15 +269,15 @@ impl<F: Fn(Transaction) -> Result<()>, Q: Fn(Request) -> Result<Response>> Subje
                 stored.profile_secrets.extend(profile_secrets);
 
                 stored.subject.merge(subject);
-                Storage::store(&self.sid, SType::Merged, &stored)?;
+                Storage::store(&self.home, &self.sid, SType::Merged, &stored)?;
                 stored
             }
         };
 
         // store final result
-        Storage::store(&self.sid, SType::Stored, &merged)?;
+        Storage::store(&self.home, &self.sid, SType::Stored, &merged)?;
         self.sto = Some(merged);
-        Storage::clean(&sid);
+        Storage::clean(&self.home, &sid);
 
         Ok(())
     }

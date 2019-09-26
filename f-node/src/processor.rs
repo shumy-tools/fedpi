@@ -6,8 +6,8 @@ use sha2::{Sha512, Digest};
 use core_fpi::{rnd_scalar, G, Result, KeyEncoder, Scalar, RistrettoPoint};
 use core_fpi::shares::*;
 use core_fpi::ids::*;
-use core_fpi::signatures::*;
 use core_fpi::messages::*;
+use core_fpi::negotiation::*;
 
 use crate::config::Config;
 
@@ -26,26 +26,7 @@ impl Processor {
     pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg: Request = decode(data)?;
         match msg {
-            Request::NegotiateMasterKey(negotiation) => {
-                // TODO: verify if the client has authorization to fire negotiation
-
-                if let Some(neg) = &self.negotiation {
-                    if neg.session == negotiation.session {
-                        let msg = Response::NegotiateMasterKey(neg.clone());
-                        return encode(&msg)
-                    }
-                }
-
-                let keys = self.derive_negotiation_keys(&negotiation);
-                let shares = self.derive_encrypted_shares(&keys.0);
-
-                // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
-                let neg = KeyResponse::sign(&negotiation.session, self.config.peers.iter().map(|p| p.pkey).collect(), shares.0, shares.1, &self.config.secret, &self.config.pkey);
-                self.negotiation = Some(neg.clone());
-                
-                let msg = Response::NegotiateMasterKey(neg);
-                encode(&msg)
-            }
+            Request::NegotiateKey(negotiation) => self.negotiate_key(negotiation)
         }
     }
 
@@ -53,10 +34,13 @@ impl Processor {
         let msg: Transaction = decode(data)?;
         match msg {
             Transaction::SyncSubject(subject) => self.check_subject(&subject),
+            
             Transaction::CreateRecord(record) => {
                 info!("CreateRecord - ({:#?} {:?} {:?})", record.record, record.key.encode(), record.base.encode());
                 Ok(())
-            }
+            },
+            
+            Transaction::CommitKey(mkey) => self.check_key(&mkey)
         }
     }
 
@@ -64,18 +48,61 @@ impl Processor {
         let msg: Transaction = decode(data)?;
         match msg {
             Transaction::SyncSubject(subject) => self.commit_subject(subject),
+            
             Transaction::CreateRecord(record) => {
                 info!("CreateRecord - ({:#?} {:?} {:?})", record.record, record.key.encode(), record.base.encode());
                 Ok(())
-            }
+            },
+            
+            Transaction::CommitKey(mkey) =>  self.commit_key(mkey)
         }
     }
 
+    fn negotiate_key(&mut self, negotiation: KeyRequest) -> Result<Vec<u8>> {
+        // verify if the client has authorization to fire negotiation
+        if negotiation.sig.key != self.config.mng_key || !negotiation.verify() {
+            return Err("Client has not authorization to negotiate master-key!")
+        }
+
+        if let Some(neg) = &self.negotiation {
+            if neg.session == negotiation.session {
+                let msg = Response::NegotiateKey(neg.clone());
+                return encode(&msg)
+            }
+        }
+
+        let keys = self.derive_negotiation_keys(&negotiation);
+        let shares = self.derive_encrypted_shares(&keys.0);
+
+        // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
+        let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
+        let neg = KeyResponse::sign(&negotiation.session, peer_keys, shares.0, keys.1, shares.1, &self.config.secret, &self.config.pkey);
+        self.negotiation = Some(neg.clone());
+        
+        let msg = Response::NegotiateKey(neg);
+        encode(&msg)
+    }
+
+    fn check_key(&self, mkey: &MasterKey) -> Result<()> {
+        info!("check-key - {:#?}", mkey.session);
+
+        Ok(())
+    }
+
+    fn commit_key(&mut self, mkey: MasterKey) -> Result<()> {
+        self.check_key(&mkey)?; // TODO: optimize by using local cache?
+        info!("commit-key - {:#?}", mkey.session);
+        
+        //TODO: should return the new public-key
+        Ok(())
+    }
+
     fn derive_negotiation_keys(&self, neg: &KeyRequest) -> (Vec::<Scalar>, Vec::<RistrettoPoint>) {
+        let n = self.config.peers.len();
         let secret = self.config.secret;
 
-        let mut private_keys = Vec::<Scalar>::with_capacity(self.config.peers.len());
-        let mut public_keys = Vec::<RistrettoPoint>::with_capacity(self.config.peers.len());
+        let mut private_keys = Vec::<Scalar>::with_capacity(n);
+        let mut public_keys = Vec::<RistrettoPoint>::with_capacity(n);
         for peer in self.config.peers.iter() {
             // perform a Diffie-Hellman between local and peer
             let dh = (&secret * &peer.pkey).compress();
@@ -83,6 +110,7 @@ impl Processor {
             // derive secret key between peers
             let mut hasher = Sha512::new();
             hasher.input(dh.as_bytes());
+            hasher.input(neg.session.as_bytes());
             let p = Scalar::from_hash(hasher);
 
             // push to vectors

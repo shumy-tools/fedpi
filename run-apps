@@ -1,7 +1,7 @@
 #!/bin/bash
 cargo build --release;
 trap 'kill %1; kill %2; kill %3' SIGINT;
-./target/release/f-node -h ./test-net/node0 -n node0 -p 26650 &
-./target/release/f-node -h ./test-net/node1 -n node1 -p 26651 &
-./target/release/f-node -h ./test-net/node2 -n node2 -p 26652 &
-./target/release/f-node -h ./test-net/node3 -n node3 -p 26653;
+./target/release/f-node -h ./test-net/node0 &
+./target/release/f-node -h ./test-net/node1 &
+./target/release/f-node -h ./test-net/node2 &
+./target/release/f-node -h ./test-net/node3;
