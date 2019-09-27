@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use crate::{Result, KeyEncoder, Scalar, RistrettoPoint};
+use crate::{Result, Scalar, RistrettoPoint};
 use crate::shares::{Share, RistrettoPolynomial};
 use crate::signatures::{IndSignature, ExtSignature};
 
@@ -44,7 +44,7 @@ impl MasterKeyRequest {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MasterKeyVote {
     pub session: String,
-    pub peers: Vec<RistrettoPoint>,
+    pub peers: Vec<u8>,
 
     // share structures with public verifiability
     pub shares: Vec<Share>,
@@ -56,7 +56,7 @@ pub struct MasterKeyVote {
 
 impl Debug for MasterKeyVote {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
-        let peers: Vec<String> = self.peers.iter().map(|p| p.compress().encode()).collect();
+        let peers = bs58::encode(&self.peers).into_string();
         fmt.debug_struct("MasterKeyVote")
             .field("session", &self.session)
             .field("peers", &peers)
@@ -69,15 +69,12 @@ impl Debug for MasterKeyVote {
 }
 
 impl MasterKeyVote {
-    pub fn sign(session: &str, peers: Vec<RistrettoPoint>, shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint) -> Self {
-        let index = peers.iter().position(|item| item == key)
-            .expect("Bug in code! Expecting to find the peer key!");
-        
-        let data = Self::data(session, &peers, &shares, &pkeys, &commit);
+    pub fn sign(session: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
+        let data = Self::data(session, peers, &shares, &pkeys, &commit);
 
         Self {
             session: session.into(),
-            peers: peers,
+            peers: peers.to_vec(),
 
             shares: shares,
             pkeys: pkeys,
@@ -87,33 +84,25 @@ impl MasterKeyVote {
         }
     }
 
-    pub fn verify(&self) -> bool {
-        let pkey = self.peers.get(self.sig.index);
-        if let None = pkey {
-            // No key found at index, signature is invalid!
-            return false
-        }
-        
+    pub fn verify(&self, pkey: &RistrettoPoint) -> bool {
         let data = Self::data(&self.session, &self.peers, &self.shares, &self.pkeys, &self.commit);
-        self.sig.verify(&pkey.unwrap(), &data)
+        self.sig.verify(pkey, &data)
     }
 
-    pub fn check(&self, session: &str, peers: &[RistrettoPoint]) -> Result<()> {
-        let n = peers.len();
-
+    pub fn check(&self, session: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
         if self.session != session {
             return Err("KeyResponse, expected the same session!")
         }
 
-        if self.peers.len() != n || self.shares.len() != n || self.pkeys.len() != n {
-            return Err("KeyResponse, expected vectors with the same lenght (peers, shares, pkeys)!")
+        if self.shares.len() != n || self.pkeys.len() != n {
+            return Err("KeyResponse, expected vectors with the same lenght (shares, pkeys)!")
         }
 
         if self.peers != peers {
             return Err("KeyResponse, expected the same peers!")
         }
 
-        if !self.verify() {
+        if !self.verify(pkey) {
             return Err("KeyResponse with invalid signature!")
         }
 
@@ -132,7 +121,7 @@ impl MasterKeyVote {
         Ok(())
     }
 
-    fn data(session: &str, peers: &[RistrettoPoint], shares: &[Share], pkeys: &[RistrettoPoint], commit: &RistrettoPolynomial) -> [Vec<u8>; 5] {
+    fn data(session: &str, peers: &[u8], shares: &[Share], pkeys: &[RistrettoPoint], commit: &RistrettoPolynomial) -> [Vec<u8>; 5] {
         // These unwrap() should never fail, or it's a serious code bug!
         let b_session = bincode::serialize(session).unwrap();
         let b_peers = bincode::serialize(peers).unwrap();
@@ -157,25 +146,26 @@ pub struct MasterKey {
 }
 
 impl MasterKey {
-    pub fn create(session: &str, peers: &[RistrettoPoint], results: Vec<MasterKeyVote>) -> Result<Self> {
+    pub fn create(session: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint]) -> Result<Self> {
         // expecting responses from all peers
-        if results.len() != peers.len() {
+        if votes.len() != n {
             return Err("Expecting responses from all peers!")
         }
 
         // check all peer responses
-        for item in results.iter() {
-            item.check(session, peers)?;
+        for item in votes.iter() {
+            let key = pkeys.get(item.sig.index).ok_or("MasterKey, expecting to find a peer at index!")?;
+            item.check(session, peers, n, key)?;
         }
 
-        let matrix = PublicMatrix::create(&results)?;
-        let votes: Vec<MasterKeyCompressedVote> = results.into_iter().map(|vote| MasterKeyCompressedVote { shares: vote.shares, commit: vote.commit, sig: vote.sig }).collect();
+        let matrix = PublicMatrix::create(&votes)?;
+        let votes: Vec<MasterKeyCompressedVote> = votes.into_iter()
+            .map(|vote| MasterKeyCompressedVote { shares: vote.shares, commit: vote.commit, sig: vote.sig }).collect();
 
         Ok(Self { session: session.into(), matrix: matrix, votes: votes, _phantom: () })
     }
 
-    pub fn check(&self, peers: &[RistrettoPoint]) -> Result<()> {
-        let n = peers.len();
+    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
         if self.votes.len() != n {
             return Err("Expecting votes from all peers!")
         }
@@ -199,7 +189,8 @@ impl MasterKey {
                 sig: item.sig.clone()
             };
 
-            resp.check(&self.session, peers)?;
+            let key = pkeys.get(item.sig.index).ok_or("MasterKey, expecting to find a peer at index!")?;
+            resp.check(&self.session, peers, n, key)?;
         }
 
         Ok(())

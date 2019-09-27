@@ -37,8 +37,8 @@ impl MasterKeyHandler {
         let shares = self.derive_encrypted_shares(&keys.0);
 
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
-        let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let vote = MasterKeyVote::sign(&req.session, peer_keys, shares.0, keys.1, shares.1, &self.config.secret, &self.config.pkey);
+        let index = self.config.key_index()?;
+        let vote = MasterKeyVote::sign(&req.session, &self.config.peers_hash, shares.0, keys.1, shares.1, &self.config.secret, &self.config.pkey, index);
         self.vote = Some(vote.clone());
         
         let msg = Response::Vote(Vote::VMasterKeyVote(vote));
@@ -48,8 +48,8 @@ impl MasterKeyHandler {
     pub fn check(&self, mkey: &MasterKey) -> Result<()> {
         info!("check-key - {:#?}", mkey.session);
 
-        let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        mkey.check(&peer_keys)
+        let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
+        mkey.check(&self.config.peers_hash, self.config.peers.len(), &pkeys)
     }
 
     pub fn commit(&mut self, mkey: MasterKey) -> Result<()> {

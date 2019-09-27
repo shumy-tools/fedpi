@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use log::LevelFilter;
+use sha2::{Sha512, Digest};
 
 use serde::{Deserialize};
-use core_fpi::{G, rnd_scalar, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
+use core_fpi::{G, rnd_scalar, Result, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
 
 fn cfg_default() -> String {
     let secret = rnd_scalar();
@@ -42,6 +43,7 @@ pub struct Config {
     pub log: LevelFilter,
     pub mng_key: RistrettoPoint,
     
+    pub peers_hash: Vec<u8>,
     pub peers: Vec<Peer>
 }
 
@@ -63,17 +65,20 @@ impl Config {
         let mng_key: CompressedRistretto = t_cfg.mng_key.decode();
         
         let mut peers = Vec::<Peer>::with_capacity(t_cfg.peers.len());
+        let mut hasher = Sha512::new();
         for i in 0..t_cfg.peers.len() {
             let index = format!("{}", i);
             let peer = t_cfg.peers.get(&index).ok_or(format!("Expected peer at index {}!", i)).unwrap();
 
             let pkey: CompressedRistretto = peer.pkey.decode();
+            hasher.input(pkey.as_bytes());
+
             let pkey = pkey.decompress().expect(&format!("Unable to decompress peer-key: {}", peer.name));
             let peer = Peer { name: peer.name.clone(), pkey: pkey };
 
             peers.push(peer);
         }
-
+        
         let llog = match t_cfg.log.as_ref() {
             "info" => LevelFilter::Info,
             "warn" => LevelFilter::Warn,
@@ -92,8 +97,14 @@ impl Config {
             log: llog,
             mng_key: mng_key.decompress().expect("Unable to decompress mng-key!"),
 
+            peers_hash: hasher.result().to_vec(),
             peers: peers
         }
+    }
+
+    pub fn key_index(&self) -> Result<usize> {
+        self.peers.iter().position(|item| item.pkey == self.pkey)
+            .ok_or("Configuration error! Expecting to find the peer-key index!")
     }
 }
 
