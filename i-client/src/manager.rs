@@ -11,7 +11,7 @@ use bincode::{serialize, deserialize};
 use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::messages::*;
-use core_fpi::negotiation::*;
+use core_fpi::keys::*;
 
 use crate::config::{Peer, Config};
 
@@ -98,7 +98,7 @@ impl Storage {
 //-----------------------------------------------------------------------------------------------------------
 // SubjectManager
 //-----------------------------------------------------------------------------------------------------------
-pub struct SubjectManager<F, Q> where F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response> {
+pub struct SubjectManager<F, Q> where F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response> {
     pub home: String,
     pub sid: String,
     pub config: Config,
@@ -111,7 +111,7 @@ pub struct SubjectManager<F, Q> where F: Fn(&Peer, Transaction) -> Result<()>, Q
     query: Q
 }
 
-impl<F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response>> SubjectManager<F, Q> {
+impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response>> SubjectManager<F, Q> {
     pub fn new(home: &str, sid: &str, cfg: Config, commit: F, query: Q) -> Self {
         let res = Storage::load(home, sid);
         Self { home: home.into(), sid: sid.into(), config: cfg, upd: res.0, mrg: res.1, sto: res.2, commit: commit, query: query }
@@ -188,33 +188,34 @@ impl<F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Re
     pub fn negotiate(&mut self) -> Result<()> {
         let session = uuid();
         let n = self.config.peers.len();
-        let req = KeyRequest::sign(&session, &self.config.secret, self.config.pkey);
+        let req = MasterKeyRequest::sign(&session, &self.config.secret, self.config.pkey);
 
         // set the results in ordered fashion
-        let mut results = Vec::<KeyResponse>::with_capacity(n);
+        let mut votes = Vec::<MasterKeyVote>::with_capacity(n);
         for peer in self.config.peers.iter() {
-            let res = (self.query)(peer, Request::NegotiateKey(req.clone()))?;
+            let res = (self.query)(peer, Request::Negotiate(Negotiate::NMasterKeyRequest(req.clone())))?;
             match res {
-                Response::NegotiateKey(res) => {
-                    if let Some(_) = results.get(res.sig.index) {
-                        // TODO: replace this with ignore or retry strategy?
-                        return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
-                    }
-                    
-                    if res.sig.index > n-1 {
-                        // TODO: replace this with ignore or retry strategy?
-                        return Err(Error::new(ErrorKind::Other, "Unexpected peer index on key negotiation!"))
-                    }
+                Response::Vote(vote) => match vote {
+                    Vote::VMasterKeyVote(vote) => {
+                        if let Some(_) = votes.get(vote.sig.index) {
+                            // TODO: replace this with ignore or retry strategy?
+                            return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
+                        }
 
-                    results.insert(res.sig.index, res);
-                }//,
-                //_=> return Err(Error::new(ErrorKind::Other, "Unexpected response for negotiation!"))
+                        if vote.sig.index > n-1 {
+                            // TODO: replace this with ignore or retry strategy?
+                            return Err(Error::new(ErrorKind::Other, "Unexpected peer index on key negotiation!"))
+                        }
+
+                        votes.insert(vote.sig.index, vote);
+                    }
+                }
             }
         }
 
         // If all is OK, create MasterKey to commit
         let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let mk = MasterKey::create(&session, &peer_keys, results)
+        let mk = MasterKey::create(&session, &peer_keys, votes)
             .map_err(|e| Error::new(ErrorKind::Other, format!("{}", e)))?;
 
         // select a random peer
@@ -224,7 +225,7 @@ impl<F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Re
         // process master-key commit
         match selection {
             None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
-            Some(sel) => (self.commit)(&sel, Transaction::CommitKey(mk))
+            Some(sel) => (self.commit)(&sel, Commit::Evidence(Evidence::EMasterKey(mk)))
         }
     }
 
@@ -258,7 +259,7 @@ impl<F: Fn(&Peer, Transaction) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Re
         // process sync message
         match selection {
             None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
-            Some(sel) => (self.commit)(&sel, Transaction::SyncSubject(subject.clone()))?
+            Some(sel) => (self.commit)(&sel, Commit::Value(Value::VSubject(subject.clone())))?
         }
 
         // merge with existent

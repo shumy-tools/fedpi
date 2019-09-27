@@ -10,12 +10,12 @@ use serde::{Serialize, Deserialize};
 // Request MasterKey negotiation
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct KeyRequest {
+pub struct MasterKeyRequest {
     pub session: String,
     pub sig: ExtSignature
 }
 
-impl KeyRequest {
+impl MasterKeyRequest {
     pub fn sign(session: &str, secret: &Scalar, key: RistrettoPoint) -> Self {
         let data = Self::data(session);
 
@@ -42,7 +42,7 @@ impl KeyRequest {
 // Response to MasterKey negotiation
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Clone)]
-pub struct KeyResponse {
+pub struct MasterKeyVote {
     pub session: String,
     pub peers: Vec<RistrettoPoint>,
 
@@ -54,10 +54,10 @@ pub struct KeyResponse {
     pub sig: IndSignature
 }
 
-impl Debug for KeyResponse {
+impl Debug for MasterKeyVote {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         let peers: Vec<String> = self.peers.iter().map(|p| p.compress().encode()).collect();
-        fmt.debug_struct("KeyResponse")
+        fmt.debug_struct("MasterKeyVote")
             .field("session", &self.session)
             .field("peers", &peers)
             .field("shares", &self.shares)
@@ -68,7 +68,7 @@ impl Debug for KeyResponse {
     }
 }
 
-impl KeyResponse {
+impl MasterKeyVote {
     pub fn sign(session: &str, peers: Vec<RistrettoPoint>, shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint) -> Self {
         let index = peers.iter().position(|item| item == key)
             .expect("Bug in code! Expecting to find the peer key!");
@@ -152,12 +152,12 @@ impl KeyResponse {
 pub struct MasterKey {
     pub session: String,
     pub matrix: PublicMatrix,
-    pub votes: Vec<MasterKeyVote>,
+    pub votes: Vec<MasterKeyCompressedVote>,
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
 impl MasterKey {
-    pub fn create(session: &str, peers: &[RistrettoPoint], results: Vec<KeyResponse>) -> Result<Self> {
+    pub fn create(session: &str, peers: &[RistrettoPoint], results: Vec<MasterKeyVote>) -> Result<Self> {
         // expecting responses from all peers
         if results.len() != peers.len() {
             return Err("Expecting responses from all peers!")
@@ -169,7 +169,7 @@ impl MasterKey {
         }
 
         let matrix = PublicMatrix::create(&results)?;
-        let votes = results.into_iter().map(|r| MasterKeyVote { shares: r.shares, commit: r.commit, sig: r.sig } ).collect();
+        let votes: Vec<MasterKeyCompressedVote> = results.into_iter().map(|vote| MasterKeyCompressedVote { shares: vote.shares, commit: vote.commit, sig: vote.sig }).collect();
 
         Ok(Self { session: session.into(), matrix: matrix, votes: votes, _phantom: () })
     }
@@ -188,7 +188,7 @@ impl MasterKey {
         for i in 0..n {
             let item = &self.votes[i];
 
-            let resp = KeyResponse {
+            let resp = MasterKeyVote {
                 session: self.session.clone(),
                 peers: peers.to_vec(),
                 
@@ -207,7 +207,7 @@ impl MasterKey {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MasterKeyVote {
+pub struct MasterKeyCompressedVote {
     pub shares: Vec<Share>,
     pub commit: RistrettoPolynomial,
     pub sig: IndSignature
@@ -219,7 +219,7 @@ pub struct PublicMatrix {
 }
 
 impl PublicMatrix {
-    fn create(res: &[KeyResponse]) -> Result<Self> {
+    fn create(res: &[MasterKeyVote]) -> Result<Self> {
         let n = res.len();
 
         let mut matrix = Vec::<Vec<RistrettoPoint>>::with_capacity(n);

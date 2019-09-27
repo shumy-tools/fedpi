@@ -1,7 +1,6 @@
 use std::sync::Arc;
-use log::info;
 
-use core_fpi::{Result, KeyEncoder};
+use core_fpi::Result;
 use core_fpi::messages::*;
 
 use crate::handlers::keys::*;
@@ -27,35 +26,38 @@ impl Processor {
     pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg: Request = decode(data)?;
         match msg {
-            Request::NegotiateKey(req) => self.mkey_handler.negotiate(req)
+            Request::Negotiate(neg) => match neg {
+                Negotiate::NMasterKeyRequest(req) => self.mkey_handler.negotiate(req)
+            }
+            
         }
     }
 
     pub fn check(&self, data: &[u8]) -> Result<()> {
-        let msg: Transaction = decode(data)?;
+        let msg: Commit = decode(data)?;
         match msg {
-            Transaction::SyncSubject(subject) => self.subject_handler.check(&subject),
-            
-            Transaction::CreateRecord(record) => {
-                info!("CreateRecord - ({:#?} {:?} {:?})", record.record, record.key.encode(), record.base.encode());
-                Ok(())
+            Commit::Evidence(evd) => match evd {
+                Evidence::EMasterKey(mkey) => self.mkey_handler.check(&mkey)
             },
-            
-            Transaction::CommitKey(mkey) => self.mkey_handler.check(&mkey)
+
+            Commit::Value(value) => match value {
+                Value::VSubject(subject) => self.subject_handler.check(&subject),
+                _ => return Err("Not implemented!")
+            }
         }
     }
 
     pub fn commit(&mut self, data: &[u8]) -> Result<()> {
-        let msg: Transaction = decode(data)?;
+        let msg: Commit = decode(data)?;
         match msg {
-            Transaction::SyncSubject(subject) => self.subject_handler.commit(subject),
-            
-            Transaction::CreateRecord(record) => {
-                info!("CreateRecord - ({:#?} {:?} {:?})", record.record, record.key.encode(), record.base.encode());
-                Ok(())
+            Commit::Evidence(evd) => match evd {
+                Evidence::EMasterKey(mkey) => self.mkey_handler.commit(mkey)
             },
-            
-            Transaction::CommitKey(mkey) =>  self.mkey_handler.commit(mkey)
+
+            Commit::Value(value) => match value {
+                Value::VSubject(subject) => self.subject_handler.commit(subject),
+                _ => return Err("Not implemented!")
+            }
         }
     }
 }

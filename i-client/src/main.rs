@@ -58,7 +58,7 @@ fn main() {
 
     let sid = matches.value_of("sid").unwrap().to_owned();
 
-    let tx_handler = |peer: &Peer, msg: Transaction| -> Result<()> {
+    let tx_handler = |peer: &Peer, msg: Commit| -> Result<()> {
         let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;
         let data = bs58::encode(&msg_data).into_string();
 

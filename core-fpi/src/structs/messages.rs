@@ -1,7 +1,7 @@
 use crate::Result;
 use crate::structs::ids::*;
 use crate::structs::records::*;
-use crate::negotiation::*;
+use crate::structs::keys::*;
 
 use log::error;
 use serde::{Serialize, Deserialize};
@@ -26,24 +26,48 @@ pub fn encode<T: Sized + Serialize>(msg: &T) -> Result<Vec<u8>> {
 }
 
 //--------------------------------------------------------------------
-// Transactions
+// Commit
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Transaction {
-    SyncSubject (Subject),
-    CreateRecord (NewRecord),
-    CommitKey (MasterKey)
+pub enum Commit {
+    Evidence(Evidence),
+    Value(Value)
+
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Evidence {
+    EMasterKey(MasterKey)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Value {
+    VSubject(Subject),
+    VNewRecord(NewRecord)
 }
 
 //--------------------------------------------------------------------
-// Queries
+// Request
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
-    NegotiateKey (KeyRequest)
+    Negotiate(Negotiate)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Negotiate {
+    NMasterKeyRequest(MasterKeyRequest)
+}
+
+//--------------------------------------------------------------------
+// Response
+//--------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Response {
-    NegotiateKey (KeyResponse)
+    Vote(Vote)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Vote {
+    VMasterKeyVote(MasterKeyVote)
 }

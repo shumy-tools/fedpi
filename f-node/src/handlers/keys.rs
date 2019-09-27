@@ -5,30 +5,30 @@ use sha2::{Sha512, Digest};
 use core_fpi::{rnd_scalar, G, Result, Scalar, RistrettoPoint};
 use core_fpi::shares::*;
 use core_fpi::messages::*;
-use core_fpi::negotiation::*;
+use core_fpi::keys::*;
 
 use crate::config::Config;
 
 pub struct MasterKeyHandler {
     config: Arc<Config>,
-    negotiation: Option<KeyResponse>,
+    vote: Option<MasterKeyVote>,
     current: Option<MasterKey>
 }
 
 impl MasterKeyHandler {
     pub fn new(cfg: Arc<Config>) -> Self {
-        Self {config: cfg, negotiation: None, current: None }
+        Self {config: cfg, vote: None, current: None }
     }
 
-    pub fn negotiate(&mut self, req: KeyRequest) -> Result<Vec<u8>> {
+    pub fn negotiate(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         // verify if the client has authorization to fire negotiation
         if req.sig.key != self.config.mng_key || !req.verify() {
             return Err("Client has not authorization to negotiate master-key!")
         }
 
-        if let Some(neg) = &self.negotiation {
-            if neg.session == req.session {
-                let msg = Response::NegotiateKey(neg.clone());
+        if let Some(vote) = &self.vote {
+            if vote.session == req.session {
+                let msg = Response::Vote(Vote::VMasterKeyVote(vote.clone()));
                 return encode(&msg)
             }
         }
@@ -38,10 +38,10 @@ impl MasterKeyHandler {
 
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
         let peer_keys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let neg = KeyResponse::sign(&req.session, peer_keys, shares.0, keys.1, shares.1, &self.config.secret, &self.config.pkey);
-        self.negotiation = Some(neg.clone());
+        let vote = MasterKeyVote::sign(&req.session, peer_keys, shares.0, keys.1, shares.1, &self.config.secret, &self.config.pkey);
+        self.vote = Some(vote.clone());
         
-        let msg = Response::NegotiateKey(neg);
+        let msg = Response::Vote(Vote::VMasterKeyVote(vote));
         encode(&msg)
     }
 
@@ -69,7 +69,7 @@ impl MasterKeyHandler {
         Ok(())
     }
 
-    fn derive_negotiation_keys(&self, neg: &KeyRequest) -> (Vec::<Scalar>, Vec::<RistrettoPoint>) {
+    fn derive_negotiation_keys(&self, neg: &MasterKeyRequest) -> (Vec::<Scalar>, Vec::<RistrettoPoint>) {
         let n = self.config.peers.len();
         let secret = self.config.secret;
 
