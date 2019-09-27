@@ -47,7 +47,7 @@ impl MasterKeyHandler {
     }
 
     pub fn check(&self, mkey: &MasterKey) -> Result<()> {
-        info!("check-key - {:#?}", mkey.session);
+        info!("CHECK-KEY - (session = {:#?})", mkey.session);
 
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
         mkey.check(&self.config.peers_hash, self.config.peers.len(), &pkeys)
@@ -55,7 +55,7 @@ impl MasterKeyHandler {
 
     pub fn commit(&mut self, mkey: MasterKey) -> Result<()> {
         self.check(&mkey)?; // TODO: optimize by using local cache?
-        info!("commit-key - {:#?}", mkey.session);
+        info!("COMMIT-KEY - (session = {:#?})", mkey.session);
         
         let n = self.config.peers.len();
 
@@ -87,7 +87,7 @@ impl MasterKeyHandler {
         // recovered the key-pair for this peer
         let y_secret = shares.iter().fold(Scalar::zero(), |total, share| total +  share.yi);
         let y_public = e_shares.2;
-        println!("SECRET {:?} -> ({:?}, {:?})", self.config.index, y_secret.encode(), y_public.encode());
+        info!("KEY-PAIR (yi*G = {:?}, Y = {:?})", (&y_secret * &G).encode(), y_public.encode());
 
         // TODO: should insert a key evolution and key pair in the DB (LocalStore / GlobalStore)
         self.evidence = Some(mkey);

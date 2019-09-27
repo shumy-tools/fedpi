@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use log::{info, error};
 
 use core_fpi::Result;
 use core_fpi::messages::*;
@@ -7,7 +8,7 @@ use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
 use crate::config::Config;
 
-// decode and dispatch messages to the respective handlers
+// decode and log dispatch messages to the respective handlers
 pub struct Processor {
     subject_handler: SubjectHandler,
     mkey_handler: MasterKeyHandler
@@ -27,9 +28,13 @@ impl Processor {
         let msg: Request = decode(data)?;
         match msg {
             Request::Negotiate(neg) => match neg {
-                Negotiate::NMasterKeyRequest(req) => self.mkey_handler.request(req)
+                Negotiate::NMasterKeyRequest(req) => {
+                    info!("REQUEST - Negotiate::NMasterKeyRequest");
+                    self.mkey_handler.request(req).map_err(|e|{
+                        error!("REQUEST-ERR - Negotiate::NMasterKeyRequest - {:?}", e);
+                    e})
+                }
             }
-            
         }
     }
 
@@ -37,11 +42,21 @@ impl Processor {
         let msg: Commit = decode(data)?;
         match msg {
             Commit::Evidence(evd) => match evd {
-                Evidence::EMasterKey(mkey) => self.mkey_handler.check(&mkey)
+                Evidence::EMasterKey(mkey) => {
+                    info!("CHECK - Evidence::EMasterKey");
+                    self.mkey_handler.check(&mkey).map_err(|e|{
+                        error!("CHECK-ERR - Evidence::EMasterKey - {:?}", e);
+                    e})
+                }
             },
 
             Commit::Value(value) => match value {
-                Value::VSubject(subject) => self.subject_handler.check(&subject),
+                Value::VSubject(subject) => {
+                    info!("CHECK - Value::VSubject");
+                    self.subject_handler.check(&subject).map_err(|e|{
+                        error!("CHECK-ERR - Value::VSubject - {:?}", e);
+                    e})
+                },
                 _ => return Err("Not implemented!")
             }
         }
@@ -51,11 +66,21 @@ impl Processor {
         let msg: Commit = decode(data)?;
         match msg {
             Commit::Evidence(evd) => match evd {
-                Evidence::EMasterKey(mkey) => self.mkey_handler.commit(mkey)
+                Evidence::EMasterKey(mkey) => {
+                    info!("COMMIT - Evidence::EMasterKey");
+                    self.mkey_handler.commit(mkey).map_err(|e|{
+                        error!("COMMIT-ERR - Evidence::EMasterKey - {:?}", e);
+                    e})
+                }
             },
 
             Commit::Value(value) => match value {
-                Value::VSubject(subject) => self.subject_handler.commit(subject),
+                Value::VSubject(subject) => {
+                    info!("COMMIT - Value::VSubject");
+                    self.subject_handler.commit(subject).map_err(|e|{
+                        error!("COMMIT-ERR - Value::VSubject - {:?}", e);
+                    e})
+                },
                 _ => return Err("Not implemented!")
             }
         }

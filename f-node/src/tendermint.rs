@@ -1,6 +1,6 @@
 use core_fpi::Result;
 
-use log::{info, error};
+use log::error;
 use abci::*;
 
 use crate::processor::Processor;
@@ -15,13 +15,12 @@ pub struct NodeApp {
 
 impl abci::Application for NodeApp {
     fn query(&mut self, req: &RequestQuery) -> ResponseQuery {
-        info!("Query-Input - {}", String::from_utf8_lossy(&req.data));
         let mut resp = ResponseQuery::new();
 
         let msg = match convert(&req.data) {
             Ok(value) => value,
             Err(err) => {
-                error!("Query ({:?})", err);
+                error!("Query-Error: {:?}", err);
                 resp.set_code(1);
                 resp.set_log(err.into());
                 return resp
@@ -31,7 +30,7 @@ impl abci::Application for NodeApp {
         match self.processor.request(&msg) {
             Ok(data) => resp.set_value(data),
             Err(err) => {
-                error!("Query ({:?})", err);
+                error!("Query-Error: {:?}", err);
                 resp.set_code(1);
                 resp.set_log(err.into());
             }
@@ -42,13 +41,12 @@ impl abci::Application for NodeApp {
 
     fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {        
         let tx = req.get_tx();
-        info!("CheckTx-Input - {}", String::from_utf8_lossy(tx));
         let mut resp = ResponseCheckTx::new();
 
         let msg = match convert(tx) {
             Ok(value) => value,
             Err(err) => {
-                error!("CheckTx ({:?})", err);
+                error!("CheckTx-Error: {:?}", err);
                 resp.set_code(1);
                 resp.set_log(err.into());
                 return resp
@@ -56,7 +54,7 @@ impl abci::Application for NodeApp {
         };
 
         if let Err(err) = self.processor.check(&msg) {
-            error!("CheckTx ({:?})", err);
+            error!("CheckTx-Error: {:?}", err);
             resp.set_code(1);
             resp.set_log(err.into());
         }
@@ -66,13 +64,12 @@ impl abci::Application for NodeApp {
 
     fn deliver_tx(&mut self, req: &RequestDeliverTx) -> ResponseDeliverTx {
         let tx = req.get_tx();
-        info!("DeliverTx-Input - {}", String::from_utf8_lossy(tx));
         let mut resp = ResponseDeliverTx::new();
 
         let msg = match convert(tx) {
             Ok(value) => value,
             Err(err) => {
-                error!("DeliverTx ({:?})", err);
+                error!("DeliverTx-Error: {:?}", err);
                 resp.set_code(1);
                 resp.set_log(err.into());
                 return resp
@@ -81,7 +78,7 @@ impl abci::Application for NodeApp {
 
         if let Err(err) = self.processor.commit(&msg) {
             // The tx should have been rejected by the mempool, but may have been included in a block by a Byzantine proposer!
-            error!("DeliverTx ({:?})", err);
+            error!("DeliverTx-Error: {:?}", err);
             resp.set_code(1);
             resp.set_log(err.into());
         }

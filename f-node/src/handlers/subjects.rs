@@ -14,7 +14,7 @@ impl SubjectHandler {
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
-        info!("check-subject - {:#?}", subject);
+        info!("CHECK-SUBJECT - (sid = {:?})", subject.sid);
         
         // TODO: find subject in the database
         let current = self.subjects.get(&subject.sid);
@@ -23,7 +23,7 @@ impl SubjectHandler {
 
     pub fn commit(&mut self, subject: Subject) -> Result<()> {
         self.check(&subject)?; // TODO: optimize by using local cache?
-        info!("commit-subject - {:#?}", subject);
+        info!("COMMIT-SUBJECT - (sid = {:?})", subject.sid);
         
         // TODO: find subject in the database
         let sid = subject.sid.clone();
@@ -32,7 +32,7 @@ impl SubjectHandler {
             None => self.subjects.insert(sid, subject),
             Some(mut current) => {
                 current.merge(subject);
-                info!("merged-subject - {:#?}", current);
+                info!("MERGED-SUBJECT - (sid = {:?})", current.sid);
                 self.subjects.insert(sid, current)
             }
         };
