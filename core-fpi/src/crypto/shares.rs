@@ -418,9 +418,9 @@ mod tests {
         let S_poly = &poly * &G;
 
         let shares = poly.shares(parties);
-        let S_shares = shares.iter().map(|s| s * &G).collect::<Vec<_>>();
+        let S_shares = shares.0.iter().map(|s| s * &G).collect::<Vec<_>>();
 
-        let r_poly = Polynomial::reconstruct(&shares[0..2*threshold + 1]);
+        let r_poly = Polynomial::reconstruct(&shares.0[0..2*threshold + 1]);
         assert!(poly == r_poly);
 
         let S_r_poly = RistrettoPolynomial::reconstruct(&S_shares[0..2*threshold + 1]);

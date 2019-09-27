@@ -49,6 +49,11 @@ impl MasterKeyHandler {
     pub fn check(&self, mkey: &MasterKey) -> Result<()> {
         info!("CHECK-KEY - (session = {:#?})", mkey.session);
 
+        // verify if the client has authorization to commit evidence (signature is verified on check)
+        if mkey.sig.key != self.config.admin {
+            return Err("Client has not authorization to commit master-key evidence!")
+        }
+
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
         mkey.check(&self.config.peers_hash, self.config.peers.len(), &pkeys)
     }

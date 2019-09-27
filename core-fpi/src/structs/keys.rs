@@ -16,12 +16,11 @@ pub struct MasterKeyRequest {
 }
 
 impl MasterKeyRequest {
-    pub fn sign(session: &str, secret: &Scalar, key: RistrettoPoint) -> Self {
+    pub fn sign(session: &str, admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
         let data = Self::data(session);
-
         Self {
             session: session.into(),
-            sig: ExtSignature::sign(secret, key, &data)
+            sig: ExtSignature::sign(admin_secret, admin_key, &data)
         }
     }
 
@@ -71,7 +70,6 @@ impl Debug for MasterKeyVote {
 impl MasterKeyVote {
     pub fn sign(session: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
         let data = Self::data(session, peers, &shares, &pkeys, &commit);
-
         Self {
             session: session.into(),
             peers: peers.to_vec(),
@@ -82,11 +80,6 @@ impl MasterKeyVote {
 
             sig: IndSignature::sign(index, secret, key, &data)
         }
-    }
-
-    pub fn verify(&self, pkey: &RistrettoPoint) -> bool {
-        let data = Self::data(&self.session, &self.peers, &self.shares, &self.pkeys, &self.commit);
-        self.sig.verify(pkey, &data)
     }
 
     pub fn check(&self, session: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
@@ -121,6 +114,11 @@ impl MasterKeyVote {
         Ok(())
     }
 
+    fn verify(&self, pkey: &RistrettoPoint) -> bool {
+        let data = Self::data(&self.session, &self.peers, &self.shares, &self.pkeys, &self.commit);
+        self.sig.verify(pkey, &data)
+    }
+
     fn data(session: &str, peers: &[u8], shares: &[Share], pkeys: &[RistrettoPoint], commit: &RistrettoPolynomial) -> [Vec<u8>; 5] {
         // These unwrap() should never fail, or it's a serious code bug!
         let b_session = bincode::serialize(session).unwrap();
@@ -142,11 +140,12 @@ pub struct MasterKey {
     pub session: String,
     pub matrix: PublicMatrix,
     pub votes: Vec<MasterKeyCompressedVote>,
+    pub sig: ExtSignature,       //signature from admin
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
 impl MasterKey {
-    pub fn create(session: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint]) -> Result<Self> {
+    pub fn sign(session: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Result<Self> {
         // expecting responses from all peers
         if votes.len() != n {
             return Err("Expecting responses from all peers!")
@@ -162,7 +161,14 @@ impl MasterKey {
         let votes: Vec<MasterKeyCompressedVote> = votes.into_iter()
             .map(|vote| MasterKeyCompressedVote { shares: vote.shares, commit: vote.commit, sig: vote.sig }).collect();
 
-        Ok(Self { session: session.into(), matrix: matrix, votes: votes, _phantom: () })
+        let data = Self::data(session, &matrix, &votes);
+        Ok(Self {
+            session: session.into(),
+            matrix: matrix,
+            votes: votes,
+            sig: ExtSignature::sign(admin_secret, admin_key, &data),
+            _phantom: ()
+        })
     }
 
     pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
@@ -170,11 +176,14 @@ impl MasterKey {
             return Err("Expecting votes from all peers!")
         }
 
+        if !self.verify() {
+            return Err("MasterKey with invalid signature!")
+        }
+
         // check matrix bounds before use
         self.matrix.check(n)?;
 
         // reconstruct each KeyResponse and check
-        // TODO: optimize to avoid clones!
         for i in 0..n {
             let item = &self.votes[i];
 
@@ -214,6 +223,20 @@ impl MasterKey {
         }
 
         (shares, commits, pkey)
+    }
+
+    fn verify(&self) -> bool {
+        let data = Self::data(&self.session, &self.matrix, &self.votes);
+        self.sig.verify(&data)
+    }
+
+    fn data(session: &str, matrix: &PublicMatrix, votes: &[MasterKeyCompressedVote]) -> [Vec<u8>; 3] {
+        // These unwrap() should never fail, or it's a serious code bug!
+        let b_session = bincode::serialize(session).unwrap();
+        let b_matrix = bincode::serialize(matrix).unwrap();
+        let b_votes = bincode::serialize(votes).unwrap();
+
+        [b_session, b_matrix, b_votes]
     }
 }
 

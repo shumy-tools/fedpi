@@ -216,7 +216,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
         // If all is OK, create MasterKey to commit
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let mk = MasterKey::create(&session, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys)
+        let mk = MasterKey::sign(&session, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
             .map_err(|e| Error::new(ErrorKind::Other, format!("{}", e)))?;
 
         // select a random peer

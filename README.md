@@ -25,3 +25,7 @@ These nodes are used to deploy a distributed federation of SS-IDs. This is a GDP
 
 ### Profile Servers (p-server)
 Is where the anonymous or encrypted data resides, providing public of private access control. Any organization can deploy their own "p-server" for specific purposes and pre-defined data structures. The organization is the GDPR **controller** of the anonymous profiles, but doesn't retain data ownership.
+
+## Semi-Completed Protocols
+- [x] Subject creation and syncronization protocol
+- [x] Master key negotiation protocol
