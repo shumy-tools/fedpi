@@ -27,7 +27,7 @@ impl Processor {
         let msg: Request = decode(data)?;
         match msg {
             Request::Negotiate(neg) => match neg {
-                Negotiate::NMasterKeyRequest(req) => self.mkey_handler.negotiate(req)
+                Negotiate::NMasterKeyRequest(req) => self.mkey_handler.request(req)
             }
             
         }

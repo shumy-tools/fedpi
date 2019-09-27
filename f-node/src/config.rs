@@ -3,7 +3,7 @@ use log::LevelFilter;
 use sha2::{Sha512, Digest};
 
 use serde::{Deserialize};
-use core_fpi::{G, rnd_scalar, Result, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
+use core_fpi::{G, rnd_scalar, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
 
 fn cfg_default() -> String {
     let secret = rnd_scalar();
@@ -18,7 +18,7 @@ fn cfg_default() -> String {
     port = 26658                        # Set the service port for tendermint
 
     log = "info"                        # Set the log level
-    mng_key = "<public-key-base64>"     # Set the management key authorized for negotiations
+    admin = "<public-key-base64>"       # Set the management key authorized for negotiations
 
     # List of valid peers
     [peers]
@@ -34,6 +34,7 @@ pub struct Peer {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub name: String,
+    pub index: usize,
     pub secret: Scalar,
     pub pkey: RistrettoPoint,
 
@@ -41,7 +42,7 @@ pub struct Config {
     pub port: usize,
 
     pub log: LevelFilter,
-    pub mng_key: RistrettoPoint,
+    pub admin: RistrettoPoint,
     
     pub peers_hash: Vec<u8>,
     pub peers: Vec<Peer>
@@ -62,7 +63,7 @@ impl Config {
 
         let t_cfg: TomlConfig = toml::from_str(&cfg).expect("Unable to decode toml configuration!");
         let pkey: CompressedRistretto = t_cfg.pkey.decode();
-        let mng_key: CompressedRistretto = t_cfg.mng_key.decode();
+        let admin: CompressedRistretto = t_cfg.admin.decode();
         
         let mut peers = Vec::<Peer>::with_capacity(t_cfg.peers.len());
         let mut hasher = Sha512::new();
@@ -78,6 +79,9 @@ impl Config {
 
             peers.push(peer);
         }
+
+        let pkey = pkey.decompress().expect("Unable to decompress pkey!");
+        let index = peers.iter().position(|item| item.pkey == pkey).expect("Configuration error! Expecting to find the corresponding peer index!");
         
         let llog = match t_cfg.log.as_ref() {
             "info" => LevelFilter::Info,
@@ -88,23 +92,19 @@ impl Config {
 
         Self {
             name: t_cfg.name,
+            index: index,
             secret: t_cfg.secret.decode(),
-            pkey: pkey.decompress().expect("Unable to decompress pkey!"),
+            pkey: pkey,
             
             threshold: t_cfg.threshold,
             port: t_cfg.port,
 
             log: llog,
-            mng_key: mng_key.decompress().expect("Unable to decompress mng-key!"),
+            admin: admin.decompress().expect("Unable to decompress mng-key!"),
 
             peers_hash: hasher.result().to_vec(),
             peers: peers
         }
-    }
-
-    pub fn key_index(&self) -> Result<usize> {
-        self.peers.iter().position(|item| item.pkey == self.pkey)
-            .ok_or("Configuration error! Expecting to find the peer-key index!")
     }
 }
 
@@ -121,7 +121,7 @@ struct TomlConfig {
     port: usize,
 
     log: String,
-    mng_key: String,
+    admin: String,
 
     peers: HashMap<String, TomlPeer>
 }

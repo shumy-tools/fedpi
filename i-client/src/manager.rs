@@ -7,6 +7,7 @@ use std::io::prelude::*;
 
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
+use clear_on_drop::clear::Clear;
 
 use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
@@ -287,8 +288,6 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 //-----------------------------------------------------------------------------------------------------------
 // MySubject
 //-----------------------------------------------------------------------------------------------------------
-use clear_on_drop::clear::Clear;
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MySubject {
     secret: Scalar,                                 // current subject-key secret

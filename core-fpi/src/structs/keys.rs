@@ -195,6 +195,26 @@ impl MasterKey {
 
         Ok(())
     }
+
+    pub fn extract(&self, index: usize) -> (Vec<Share>, Vec<RistrettoPolynomial>, RistrettoPoint) {
+        let n = self.votes.len();
+
+        // index should be confirmed before calling this
+        let mut shares = Vec::<Share>::with_capacity(n);
+        let mut commits = Vec::<RistrettoPolynomial>::with_capacity(n);
+        let mut pkey = RistrettoPoint::default();
+        for vote in self.votes.iter() {
+            // collect all shares targeting this peer
+            let share = vote.shares[index].clone();
+            let commit = vote.commit.clone();
+            
+            pkey += commit.A[0];
+            shares.push(share);
+            commits.push(commit);
+        }
+
+        (shares, commits, pkey)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

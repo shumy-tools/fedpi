@@ -25,26 +25,19 @@ pub fn encode<T: Sized + Serialize>(msg: &T) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-//--------------------------------------------------------------------
-// Commit
-//--------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Commit {
-    Evidence(Evidence),
-    Value(Value)
-
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Evidence {
-    EMasterKey(MasterKey)
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Value {
-    VSubject(Subject),
-    VNewRecord(NewRecord)
-}
+/*
+-----------------------------------------------
+                Message Hierarchy
+-----------------------------------------------
+|     Request     |   Response   |   Commit   |
+-----------------------------------------------
+|    Negotiate    |     Vote     |   Evidence |
+|      Query      |    Result    |      X     |
+|        X        |       X      |    Value   |
+|        X        |    Notify    |      X     |
+|  Publish/Send   |       X      |      X     |
+-----------------------------------------------
+*/
 
 //--------------------------------------------------------------------
 // Request
@@ -70,4 +63,24 @@ pub enum Response {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Vote {
     VMasterKeyVote(MasterKeyVote)
+}
+
+//--------------------------------------------------------------------
+// Commit
+//--------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Commit {
+    Evidence(Evidence),
+    Value(Value)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Evidence {
+    EMasterKey(MasterKey)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Value {
+    VSubject(Subject),
+    VNewRecord(NewRecord)
 }

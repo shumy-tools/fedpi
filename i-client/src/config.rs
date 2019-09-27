@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use log::LevelFilter;
 use sha2::{Sha512, Digest};
+use clear_on_drop::clear::Clear;
 
 use serde::{Deserialize};
 use core_fpi::{G, rnd_scalar, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
@@ -38,6 +39,12 @@ pub struct Config {
 
     pub peers_hash: Vec<u8>,
     pub peers: Vec<Peer>
+}
+
+impl Drop for Config {
+    fn drop(&mut self) {
+        self.secret.clear();
+    }
 }
 
 impl Config {

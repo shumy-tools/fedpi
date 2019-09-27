@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use core::ops::{Add, Mul, Sub};
 use rand_os::OsRng;
+use clear_on_drop::clear::Clear;
 
 use serde::{Serialize, Deserialize};
 
@@ -10,10 +11,16 @@ use crate::{Scalar, RistrettoPoint, KeyEncoder};
 //-----------------------------------------------------------------------------------------------------------
 // Share
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Share {
     pub i: u32,
     pub yi: Scalar
+}
+
+impl Drop for Share {
+    fn drop(&mut self) {
+        self.yi.clear();
+    }
 }
 
 impl Debug for Share {
@@ -69,12 +76,25 @@ impl<'a, 'b> Mul<&'b RistrettoPoint> for &'a Share {
     }
 }
 
+//-----------------------------------------------------------------------------------------------------------
+// ShareVector
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ShareVector(pub Vec<Share>);
+
+impl Drop for ShareVector {
+    fn drop(&mut self) {
+        for item in self.0.iter_mut() {
+            item.yi.clear();
+        }
+    }
+}
 
 //-----------------------------------------------------------------------------------------------------------
 // RistrettoShare
 //-----------------------------------------------------------------------------------------------------------
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct RistrettoShare {
     pub i: u32,
     pub Yi: RistrettoPoint
@@ -166,9 +186,17 @@ pub trait Degree {
 //-----------------------------------------------------------------------------------------------------------
 // Polynomial
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Polynomial {
     pub a: Vec<Scalar>
+}
+
+impl Drop for Polynomial {
+    fn drop(&mut self) {
+        for item in self.a.iter_mut() {
+            item.clear();
+        }
+    }
 }
 
 impl<'a, 'b> Mul<&'b Scalar> for &'a Polynomial {
@@ -190,13 +218,16 @@ impl<'a, 'b> Mul<&'b RistrettoPoint> for &'a Polynomial {
 }
 
 impl Polynomial {
-    pub fn rnd(secret: Scalar, degree: usize) -> Self {
+    pub fn rnd(mut secret: Scalar, degree: usize) -> Self {
         let mut coefs = vec![secret];
 
         let mut csprng: OsRng = OsRng::new().unwrap();
         let rnd_coefs: Vec<Scalar> = (0..degree).map(|_| Scalar::random(&mut csprng)).collect();
         coefs.extend(rnd_coefs);
         
+        // clear secret before drop
+        secret.clear();
+
         Polynomial { a: coefs }
     }
 
@@ -213,7 +244,7 @@ impl Polynomial {
         num * denum.invert()
     }
 
-    pub fn shares(&self, n: usize) -> Vec<Share> {
+    pub fn shares(&self, n: usize) -> ShareVector {
         let mut shares = Vec::<Share>::with_capacity(n);
         for j in 1..n + 1 {
             let x = Scalar::from(j as u64);
@@ -221,7 +252,7 @@ impl Polynomial {
             shares.push(share);
         }
 
-        shares
+        ShareVector(shares)
     }
 }
 
