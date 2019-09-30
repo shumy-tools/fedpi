@@ -74,9 +74,9 @@ impl MasterKeyVote {
             session: session.into(),
             peers: peers.to_vec(),
 
-            shares: shares,
-            pkeys: pkeys,
-            commit: commit,
+            shares,
+            pkeys,
+            commit,
 
             sig: IndSignature::sign(index, secret, key, &data)
         }
@@ -164,8 +164,8 @@ impl MasterKey {
         let data = Self::data(session, &matrix, &votes);
         Ok(Self {
             session: session.into(),
-            matrix: matrix,
-            votes: votes,
+            matrix,
+            votes,
             sig: ExtSignature::sign(admin_secret, admin_key, &data),
             _phantom: ()
         })

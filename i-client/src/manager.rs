@@ -115,7 +115,7 @@ pub struct SubjectManager<F, Q> where F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(
 impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Response>> SubjectManager<F, Q> {
     pub fn new(home: &str, sid: &str, cfg: Config, commit: F, query: Q) -> Self {
         let res = Storage::load(home, sid);
-        Self { home: home.into(), sid: sid.into(), config: cfg, upd: res.0, mrg: res.1, sto: res.2, commit: commit, query: query }
+        Self { home: home.into(), sid: sid.into(), config: cfg, upd: res.0, mrg: res.1, sto: res.2, commit, query }
     }
 
     pub fn reset(&mut self) {
@@ -124,18 +124,18 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
     pub fn create(&mut self) -> Result<()> {
         self.check_pending()?;
-        if let Some(_) = self.sto {
+        if self.sto.is_some() {
             return Err(Error::new(ErrorKind::Other, "You already have a subject in the store!"))
         }
 
         let secret = rnd_scalar();
         let skey = secret * G;
 
-        let mut sub = Subject::new(&self.sid);
-        sub.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
+        let mut subject = Subject::new(&self.sid);
+        subject.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
 
         // sync update
-        let update = MySubject { secret: secret, profile_secrets: HashMap::new(), subject: sub };
+        let update = MySubject { secret, profile_secrets: HashMap::new(), subject };
         self.sync_subject(update)
     }
 
@@ -143,15 +143,15 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         self.check_pending()?;
 
         match &self.sto {
-            None => return Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
                 let (secret, skey) = my.subject.evolve(my.secret);
 
-                let mut sub = Subject::new(&self.sid);
-                sub.keys.push(skey);
+                let mut subject = Subject::new(&self.sid);
+                subject.keys.push(skey);
 
                 // sync update
-                let update = MySubject { secret: secret, profile_secrets: HashMap::new(), subject: sub };
+                let update = MySubject { secret, profile_secrets: HashMap::new(), subject };
                 self.sync_subject(update)
             }
         }
@@ -161,9 +161,9 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         self.check_pending()?;
 
         match &self.sto {
-            None => return Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
-                let skey = my.subject.keys.last().ok_or(Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+                let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
 
                 let mut profile = Profile::new(typ, lurl);
                 let (p_secret, pkey) = match my.subject.find(typ, lurl) {
@@ -180,7 +180,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 sub.push(profile);
 
                 // sync update
-                let update = MySubject { secret: my.secret, profile_secrets: profile_secrets, subject: sub };
+                let update = MySubject { secret: my.secret, profile_secrets, subject: sub };
                 self.sync_subject(update)
             }
         }
@@ -198,7 +198,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             match res {
                 Response::Vote(vote) => match vote {
                     Vote::VMasterKeyVote(vote) => {
-                        if let Some(_) = votes.get(vote.sig.index) {
+                        if votes.get(vote.sig.index).is_some() {
                             // TODO: replace this with ignore or retry strategy?
                             return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
                         }
@@ -217,7 +217,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         // If all is OK, create MasterKey to commit
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
         let mk = MasterKey::sign(&session, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("{}", e)))?;
+            .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
         // select a random peer
         use rand::seq::SliceRandom;
@@ -225,17 +225,17 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
         // process master-key commit
         match selection {
-            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
+            None => Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
             Some(sel) => (self.commit)(&sel, Commit::Evidence(Evidence::EMasterKey(mk)))
         }
     }
 
     fn check_pending(&self) -> Result<()> {
-        if let Some(_) = self.upd {
+        if self.upd.is_some() {
             return Err(Error::new(ErrorKind::Other, "There is a pending synchronization in the log!"))
         }
 
-        if let Some(_) = self.mrg {
+        if self.mrg.is_some() {
             return Err(Error::new(ErrorKind::Other, "There is a pending synchronization in the log!"))
         }
 
@@ -244,7 +244,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
     //TODO: improve performance. Try to remove the many clone() calls!
     fn sync_subject(&mut self, update: MySubject) -> Result<()> {
-        let secret = update.secret.clone();
+        let secret = update.secret;
         let profile_secrets = update.profile_secrets.clone();
         
         let subject = update.subject.clone();

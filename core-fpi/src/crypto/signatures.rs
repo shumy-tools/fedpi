@@ -48,10 +48,10 @@ impl<'de> Deserialize<'de> for Signature {
         p_bytes.copy_from_slice(&data[32..64]);
 
         let c_scalar = Scalar::from_canonical_bytes(c_bytes)
-            .ok_or(Error::custom("Invalid c scalar!"))?;
+            .ok_or_else(|| Error::custom("Invalid c scalar!"))?;
         
         let p_scalar = Scalar::from_canonical_bytes(p_bytes)
-            .ok_or(Error::custom("Invalid p scalar!"))?;
+            .ok_or_else(|| Error::custom("Invalid p scalar!"))?;
 
         let obj = Signature { encoded: as_string, c: c_scalar, p: p_scalar };
         Ok(obj)
@@ -86,7 +86,7 @@ impl Signature {
         let data = data.concat();
         let as_string = bs58::encode(&data).into_string();
 
-        Self { encoded: as_string, c: c, p: m - c * s }
+        Self { encoded: as_string, c, p: m - c * s }
     }
 
     #[allow(non_snake_case)]
@@ -129,7 +129,7 @@ impl ExtSignature {
     #[allow(non_snake_case)]
     pub fn sign(s: &Scalar, key: RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, &key, &G, data);
-        Self { sig: sig, key: key }
+        Self { sig, key }
     }
 
     #[allow(non_snake_case)]
@@ -150,7 +150,7 @@ pub struct IndSignature {
 impl IndSignature {
     pub fn sign(index: usize, s: &Scalar, key: &RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, key, &G, data);
-        Self { index: index, sig: sig }
+        Self { index, sig }
     }
 
     #[allow(non_snake_case)]

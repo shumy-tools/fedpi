@@ -75,14 +75,14 @@ impl MasterKeyHandler {
         let share_index = e_shares.0[0].i;
         let mut shares = Vec::<Share>::with_capacity(n);
         for (i, e_i) in e_keys.0.iter().enumerate() {
-            let share = &e_shares.0[i] - e_i;
-            let r_share = &share * &G;
-
             if e_shares.0[i].i != share_index {
                 return Err("Invalid share index!")
             }
 
-            if e_shares.1[i].verify(&r_share) {
+            let share = &e_shares.0[i] - e_i;
+            let r_share = &share * &G;
+
+            if !e_shares.1[i].verify(&r_share) {
                 return Err("Invalid recovered share!")
             }
 

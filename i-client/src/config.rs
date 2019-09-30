@@ -53,9 +53,9 @@ impl Config {
         
         let cfg = match std::fs::read_to_string(&filename) {
             Ok(content) => content,
-            Err(e) => {
+            Err(_) => {
                 let def_cfg = cfg_default();
-                std::fs::write(&filename, &def_cfg).expect(&format!("Problems when creating the default config file: {}", e));
+                std::fs::write(&filename, &def_cfg).unwrap_or_else(|e| panic!("Problems when creating the default config file: {}", e));
                 def_cfg
             }
         };
@@ -67,15 +67,15 @@ impl Config {
         let mut hasher = Sha512::new();
         for i in 0..t_cfg.peers.len() {
             let index = format!("{}", i);
-            let peer = t_cfg.peers.get(&index).ok_or(format!("Expected peer at index {}!", i)).unwrap();
+            let peer = t_cfg.peers.get(&index).unwrap_or_else(|| panic!("Expected peer at index {}!", i));
 
             let pkey: CompressedRistretto = peer.pkey.decode();
             hasher.input(pkey.as_bytes());
 
-            let pkey = pkey.decompress().expect(&format!("Unable to decompress peer-key: {}", peer.host));
+            let pkey = pkey.decompress().unwrap_or_else(|| panic!("Unable to decompress peer-key: {}", peer.host));
 
-            let host = if peer.host.ends_with("/") { &peer.host[..peer.host.len()-1] } else { &peer.host };
-            let peer = Peer { host: host.into(), pkey: pkey };
+            let host = if peer.host.ends_with('/') { &peer.host[..peer.host.len()-1] } else { &peer.host };
+            let peer = Peer { host: host.into(), pkey };
 
             peers.push(peer);
         }
@@ -96,7 +96,7 @@ impl Config {
             log: llog,
 
             peers_hash: hasher.result().to_vec(),
-            peers: peers
+            peers
         }
     }
 }

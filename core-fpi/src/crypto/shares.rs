@@ -51,14 +51,14 @@ impl<'a, 'b> Sub<&'b Share> for &'a Share {
     type Output = Share;
     fn sub(self, rhs: &'b Share) -> Share {
         assert!(self.i == rhs.i);
-        Share { i: self.i, yi: self.yi + rhs.yi }
+        Share { i: self.i, yi: self.yi - rhs.yi }
     }
 }
 
 impl<'a, 'b> Sub<&'b Scalar> for &'a Share {
     type Output = Share;
     fn sub(self, rhs: &'b Scalar) -> Share {
-        Share { i: self.i, yi: self.yi + rhs }
+        Share { i: self.i, yi: self.yi - rhs }
     }
 }
 
@@ -143,9 +143,9 @@ fn cut_tail<Z>(v: &mut Vec::<Z>, elm: Z) where Z: Eq {
 fn short_mul(a: &mut Vec::<Scalar>, b: Scalar) {
     let mut prev = a[0];
     a[0] *= b;
-    for i in 1..a.len() {
-        let this = a[i];
-        a[i] = prev + a[i] * b;
+    for v in a.iter_mut().skip(1) {
+        let this = *v;
+        *v = prev + *v * b;
         prev = this;
     }
     a.push(Scalar::one());
@@ -246,7 +246,7 @@ impl Polynomial {
 
     pub fn shares(&self, n: usize) -> ShareVector {
         let mut shares = Vec::<Share>::with_capacity(n);
-        for j in 1..n + 1 {
+        for j in 1..=n {
             let x = Scalar::from(j as u64);
             let share = Share { i: j as u32, yi: self.evaluate(&x) };
             shares.push(share);
@@ -275,8 +275,8 @@ impl Interpolate<Share> for Polynomial {
         let range = shares.iter().map(|s| Scalar::from(s.i)).collect::<Vec<_>>();
 
         let mut acc = Scalar::zero();
-        for i in 0..shares.len() {
-            acc += Polynomial::l_i(&range, i) * shares[i].yi;
+        for (i, item) in shares.iter().enumerate() {
+            acc += Polynomial::l_i(&range, i) * item.yi;
         }
 
         acc
@@ -290,10 +290,10 @@ impl Reconstruct<Share> for Polynomial {
         let range = shares.iter().map(|s| Scalar::from(s.i)).collect::<Vec<_>>();
 
         let mut acc = vec![Scalar::zero(); range.len()];
-        for i in 0..shares.len() {
+        for (i, item) in shares.iter().enumerate() {
             let (num, barycentric) = lx_num_bar(&range, i);
             for j in 0..num.len() {
-                acc[j] += num[j] * barycentric * shares[i].yi;
+                acc[j] += num[j] * barycentric * item.yi;
             }
         }
 
@@ -339,7 +339,7 @@ impl<'a, 'b> Mul<&'b Scalar> for &'a RistrettoPolynomial {
 
 impl RistrettoPolynomial {
     pub fn verify(&self, share: &RistrettoShare) -> bool {
-        let x = Scalar::from(share.i as u64);
+        let x = Scalar::from(u64::from(share.i));
         share.Yi == self.evaluate(&x)
     }
 }
@@ -364,8 +364,8 @@ impl Interpolate<RistrettoShare> for RistrettoPolynomial {
         let range = shares.iter().map(|s| Scalar::from(s.i)).collect::<Vec<_>>();
 
         let mut acc = RistrettoPoint::default();
-        for i in 0..shares.len() {
-            acc += Polynomial::l_i(&range, i) * shares[i].Yi;
+        for (i, item) in shares.iter().enumerate() {
+            acc += Polynomial::l_i(&range, i) * item.Yi;
         }
 
         acc
@@ -380,10 +380,10 @@ impl Reconstruct<RistrettoShare> for RistrettoPolynomial {
         let range = shares.iter().map(|s| Scalar::from(s.i)).collect::<Vec<_>>();
 
         let mut acc = vec![RistrettoPoint::default(); range.len()];
-        for i in 0..shares.len() {
+        for (i, item) in shares.iter().enumerate() {
             let (num, barycentric) = lx_num_bar(&range, i);
             for j in 0..num.len() {
-                acc[j] += num[j] * barycentric * shares[i].Yi;
+                acc[j] += num[j] * barycentric * item.Yi;
             }
         }
 

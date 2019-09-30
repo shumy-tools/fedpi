@@ -60,7 +60,7 @@ impl Subject {
 
         for (key, item) in update.profiles.into_iter() {
             match self.profiles.get_mut(&key) {
-                None => {self.profiles.insert(key, item); ()},
+                None => {self.profiles.insert(key, item);},
                 Some(ref mut current) => current.merge(item)
             }
         }
@@ -94,7 +94,7 @@ impl Subject {
 
         // check profiles (it's ok if there are no profiles)
         let empty_map = HashMap::<String, Profile>::new();
-        return Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
+        Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
     }
 
     fn check_evolve(&self, current: &Subject) -> Result<()>  {
@@ -125,7 +125,7 @@ impl Subject {
         let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
 
         // check profiles
-        if self.profiles.len() == 0 {
+        if self.profiles.is_empty() {
             return Err("Subject update must have at least one profile!")
         }
 
@@ -166,14 +166,14 @@ impl Debug for SubjectKey {
 
 impl SubjectKey {
     pub fn new(sid: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &RistrettoPoint) -> Self {
-        let sig_data = Self::data(sid, &index, &skey);
+        let sig_data = Self::data(sid, index, &skey);
         let sig = IndSignature::sign(index, sig_s, sig_key, &sig_data);
         
-        Self { key: skey, sig: sig, _phantom: () }
+        Self { key: skey, sig, _phantom: () }
     }
 
     fn check(&self, sid: &str, sig_key: &SubjectKey) -> Result<()> {
-        let sig_data = Self::data(sid, &self.sig.index, &self.key);
+        let sig_data = Self::data(sid, self.sig.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid subject-key signature!")
         }
@@ -181,12 +181,12 @@ impl SubjectKey {
         Ok(())
     }
 
-    fn data(sid: &str, index: &usize, key: &RistrettoPoint) -> [Vec<u8>; 3] {
+    fn data(sid: &str, index: usize, key: &RistrettoPoint) -> [Vec<u8>; 3] {
         let c_key = key.compress();
 
         // These unwrap() should never fail, or it's a serious code bug!
         let b_sid = bincode::serialize(sid).unwrap();
-        let b_index = bincode::serialize(index).unwrap();
+        let b_index = bincode::serialize(&index).unwrap();
         let b_key = bincode::serialize(&c_key).unwrap();
 
         [b_sid, b_index, b_key]
@@ -299,14 +299,14 @@ impl Debug for ProfileKey {
 
 impl ProfileKey {
     pub fn new(sid: &str, typ: &str, lurl: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let sig_data = Self::data(sid, typ, lurl, &index, &skey);
+        let sig_data = Self::data(sid, typ, lurl, index, &skey);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
-        Self { index: index, key: skey, sig: sig, _phantom: () }
+        Self { index, key: skey, sig, _phantom: () }
     }
 
     fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
-        let sig_data = Self::data(sid, typ, lurl, &self.index, &self.key);
+        let sig_data = Self::data(sid, typ, lurl, self.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid profile-key signature!")
         }
@@ -314,14 +314,14 @@ impl ProfileKey {
         Ok(())
     }
 
-    fn data(sid: &str, typ: &str, lurl: &str, index: &usize, key: &RistrettoPoint) -> [Vec<u8>; 5] {
+    fn data(sid: &str, typ: &str, lurl: &str, index: usize, key: &RistrettoPoint) -> [Vec<u8>; 5] {
         let c_key = key.compress();
 
         // These unwrap() should never fail, or it's a serious code bug!
         let b_sid = bincode::serialize(sid).unwrap();
         let b_typ = bincode::serialize(typ).unwrap();
         let b_lurl = bincode::serialize(lurl).unwrap();
-        let b_index = bincode::serialize(index).unwrap();
+        let b_index = bincode::serialize(&index).unwrap();
         let b_key = bincode::serialize(&c_key).unwrap();
 
         [b_sid, b_typ, b_lurl, b_index, b_key]

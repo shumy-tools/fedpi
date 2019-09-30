@@ -23,7 +23,7 @@ impl Record {
         let sig_data = Self::data(&prev, &data);
         let sig = Signature::sign(secret, pseudonym, base, &sig_data);
 
-        Self { data: data, prev: prev.into(), sig: sig, _phantom: () }
+        Self { data, prev: prev.into(), sig, _phantom: () }
     }
 
     pub fn check(&self, last: Option<&Record>, base: &RistrettoPoint, pseudonym: &RistrettoPoint) -> Result<()> {
@@ -63,7 +63,7 @@ impl Record {
         Ok(())
     }
 
-    fn data(prev: &str, data: &Vec<u8>) -> [Vec<u8>; 2] {
+    fn data(prev: &str, data: &[u8]) -> [Vec<u8>; 2] {
         let b_prev = bincode::serialize(prev).unwrap();
         let b_data = bincode::serialize(data).unwrap();
 

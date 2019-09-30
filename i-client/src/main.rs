@@ -1,4 +1,4 @@
-#[forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 
 use std::io::{Result, Error, ErrorKind};
 use clap::{Arg, App, SubCommand};
@@ -11,7 +11,7 @@ mod manager;
 
 use config::Peer;
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
     let matches = App::new("FedPI Node")
@@ -51,7 +51,7 @@ fn main() {
         .get_matches();
     
     let home = matches.value_of("home").unwrap_or(".");
-    let home = if home.ends_with("/") { &home[..home.len()-1] } else { home };
+    let home = if home.ends_with('/') { &home[..home.len()-1] } else { home };
 
     // read configuration from HOME/config/app.config.toml file
     let cfg = config::Config::new(&home);
