@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::IndSignature;
+use crate::consents::*;
 use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
@@ -11,10 +12,13 @@ use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Subject {
-    pub sid: String,                                        // Subject ID - <F-ID>:<Name>
-    pub keys: Vec<SubjectKey>,                              // All subject keys
+    pub sid: String,                                            // Subject ID - <Name>
+    pub keys: Vec<SubjectKey>,                                  // All subject keys
 
-    pub profiles: HashMap<String, Profile>,
+    pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
+    pub consents: HashMap<String, HashMap<String, Consent>>,    // All profile consents per client <authorized-key: <consent-signature>>
+    // revoked consents should not be part of the consent list, although those are still recorded in the DB
+
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
@@ -36,11 +40,11 @@ impl Subject {
     pub fn evolve(&self, sig_s: Scalar) -> (Scalar, SubjectKey) {
         let sig_key = sig_s * G;
         match self.keys.last() {
-            None => (sig_s, SubjectKey::new(&self.sid, 0, sig_key, &sig_s, &sig_key)),
+            None => (sig_s, SubjectKey::sign(&self.sid, 0, sig_key, &sig_s, &sig_key)),
             Some(active) => {
                 let secret = rnd_scalar();
                 let skey = secret * G;
-                (secret, SubjectKey::new(&self.sid, active.sig.index + 1, skey, &sig_s, &sig_key))
+                (secret, SubjectKey::sign(&self.sid, active.sig.index + 1, skey, &sig_s, &sig_key))
             }
         }
     }
@@ -165,7 +169,7 @@ impl Debug for SubjectKey {
 }
 
 impl SubjectKey {
-    pub fn new(sid: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &RistrettoPoint) -> Self {
+    pub fn sign(sid: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &RistrettoPoint) -> Self {
         let sig_data = Self::data(sid, index, &skey);
         let sig = IndSignature::sign(index, sig_s, sig_key, &sig_data);
         
@@ -234,8 +238,8 @@ impl Profile {
         let key = secret * G;
 
         let pkey = match self.chain.last() {
-            None => ProfileKey::new(sid, &self.typ, &self.lurl, 0, key, sig_s, sig_key),
-            Some(active) => ProfileKey::new(sid, &self.typ, &self.lurl, active.index + 1, key, sig_s, sig_key)
+            None => ProfileKey::sign(sid, &self.typ, &self.lurl, 0, key, sig_s, sig_key),
+            Some(active) => ProfileKey::sign(sid, &self.typ, &self.lurl, active.index + 1, key, sig_s, sig_key)
         };
 
         (secret, pkey)
@@ -298,7 +302,7 @@ impl Debug for ProfileKey {
 }
 
 impl ProfileKey {
-    pub fn new(sid: &str, typ: &str, lurl: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+    pub fn sign(sid: &str, typ: &str, lurl: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let sig_data = Self::data(sid, typ, lurl, index, &skey);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
@@ -427,7 +431,7 @@ mod tests {
         assert!(incorrect.check(None) == Err("No key found for subject creation!"));
 
         let mut incorrect = Subject::new(sid);
-        incorrect.keys.push(SubjectKey::new(sid, 1, sig_key1, &sig_s1, &sig_key1));
+        incorrect.keys.push(SubjectKey::sign(sid, 1, sig_key1, &sig_s1, &sig_key1));
         assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!"));
 
         //--------------------------------------------------
@@ -437,8 +441,8 @@ mod tests {
         let sig_key2 = sig_s2 * G;
 
         // try to evolve with wrong index and self-signed!
-        let skey2 = SubjectKey::new(sid, 0, sig_key2, &sig_s1, &sig_key1);
-        let skey3 = SubjectKey::new(sid, 1, sig_key2, &sig_s2, &sig_key2);
+        let skey2 = SubjectKey::sign(sid, 0, sig_key2, &sig_s1, &sig_key1);
+        let skey3 = SubjectKey::sign(sid, 1, sig_key2, &sig_s2, &sig_key2);
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey2);

@@ -1,3 +1,4 @@
+pub mod consents;
 pub mod ids;
 pub mod records;
 pub mod keys;

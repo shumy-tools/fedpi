@@ -35,7 +35,7 @@ impl MasterKeyHandler {
         }
 
         let e_keys = self.derive_encryption_keys(&req.session);         // encryption keys (e_i)
-        let p_keys = e_keys.0.iter().map(|e_i| e_i * &G).collect();     // public keys (e_i * G -> E_i)
+        let p_keys = e_keys.0.iter().map(|e_i| e_i * G).collect();      // public keys (e_i * G -> E_i)
         let e_shares = self.derive_encrypted_shares(&e_keys);           // encrypted shares and Feldman's Coefficients (e_i + y_i -> p_i, A_k)
 
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
@@ -92,7 +92,7 @@ impl MasterKeyHandler {
         // recovered the key-pair for this peer
         let y_secret = shares.iter().fold(Scalar::zero(), |total, share| total +  share.yi);
         let y_public = e_shares.2;
-        info!("KEY-PAIR (yi*G = {:?}, Y = {:?})", (&y_secret * &G).encode(), y_public.encode());
+        info!("KEY-PAIR (yi*G = {:?}, Y = {:?})", (y_secret * G).encode(), y_public.encode());
 
         // TODO: should insert a key evolution and key pair in the DB (LocalStore / GlobalStore)
         self.evidence = Some(mkey);
@@ -113,7 +113,7 @@ impl MasterKeyHandler {
         let mut e_keys = Vec::<Scalar>::with_capacity(n);
         for peer in self.config.peers.iter() {
             // perform a Diffie-Hellman between local and peer
-            let dh = (&self.config.secret * &peer.pkey).compress();
+            let dh = (self.config.secret * peer.pkey).compress();
 
             // derive secret key between peers
             let mut hasher = Sha512::new();

@@ -57,7 +57,7 @@ impl Processor {
                         error!("CHECK-ERR - Value::VSubject - {:?}", e);
                     e})
                 },
-                _ => return Err("Not implemented!")
+                _ => Err("Not implemented!")
             }
         }
     }
@@ -81,7 +81,7 @@ impl Processor {
                         error!("COMMIT-ERR - Value::VSubject - {:?}", e);
                     e})
                 },
-                _ => return Err("Not implemented!")
+                _ => Err("Not implemented!")
             }
         }
     }

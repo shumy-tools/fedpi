@@ -9,7 +9,7 @@ use crate::{OPEN, CLOSE, Result, Scalar, RistrettoPoint};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Record {
     pub prev: String,
-    pub data: Vec<u8>,                      // TODO: data fields may release some info connection different streams!
+    pub data: Vec<u8>,                      // TODO: data fields may release some info connecting different streams!
     pub sig: Signature,
     _phantom: () // force use of constructor
 }
@@ -19,7 +19,7 @@ impl Record {
         &self.sig.encoded
     }
 
-    pub fn new(prev: &str, data: Vec<u8>, base: &RistrettoPoint, secret: &Scalar, pseudonym: &RistrettoPoint) -> Self {
+    pub fn sign(prev: &str, data: Vec<u8>, base: &RistrettoPoint, secret: &Scalar, pseudonym: &RistrettoPoint) -> Self {
         let sig_data = Self::data(&prev, &data);
         let sig = Signature::sign(secret, pseudonym, base, &sig_data);
 
@@ -94,7 +94,7 @@ mod tests {
         let pseudonym = secret * base;
         
         let r_data = "record data".as_bytes().to_vec();
-        let record = Record::new(OPEN, r_data, &base, &secret, &pseudonym);
+        let record = Record::sign(OPEN, r_data, &base, &secret, &pseudonym);
         assert!(record.check(None, &base, &pseudonym) == Ok(()));
     }
 
@@ -106,18 +106,18 @@ mod tests {
         let pseudonym = secret * base;
         
         let r_data = "record data".as_bytes().to_vec();
-        let record = Record::new(OPEN, r_data, &base, &secret, &pseudonym);
+        let record = Record::sign(OPEN, r_data, &base, &secret, &pseudonym);
         assert!(record.check(None, &base, &pseudonym) == Ok(()));
 
         let r_data1 = "next data1".as_bytes().to_vec();
-        let record1 = Record::new(OPEN, r_data1, &base, &secret, &pseudonym);
+        let record1 = Record::sign(OPEN, r_data1, &base, &secret, &pseudonym);
         assert!(record1.check(Some(&record), &base, &pseudonym) == Err("Record is not part of the stream!"));
 
         let secret1 = rnd_scalar();
         let pseudonym1 = secret1 * base;
 
         let r_data2 = "next data2".as_bytes().to_vec();
-        let record2 = Record::new(record.id(), r_data2, &base, &secret1, &pseudonym1);
+        let record2 = Record::sign(record.id(), r_data2, &base, &secret1, &pseudonym1);
         assert!(record2.check(Some(&record), &base, &pseudonym) == Err("Last record doesn't match the key for the signature!"));
     }
 }

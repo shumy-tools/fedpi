@@ -1,0 +1,2 @@
+too-many-arguments-threshold = 11
+enum-variant-size-threshold = 8000

@@ -132,7 +132,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         let skey = secret * G;
 
         let mut subject = Subject::new(&self.sid);
-        subject.keys.push(SubjectKey::new(&self.sid, 0, skey, &secret, &skey));
+        subject.keys.push(SubjectKey::sign(&self.sid, 0, skey, &secret, &skey));
 
         // sync update
         let update = MySubject { secret, profile_secrets: HashMap::new(), subject };
