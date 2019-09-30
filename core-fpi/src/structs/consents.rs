@@ -11,8 +11,8 @@ use crate::{Result, KeyEncoder, Scalar, RistrettoPoint};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Consent {
     pub sid: String,                                // Subject identification
-    pub profiles: Vec<String>,                      // List of consented profiles (full disclosure)
     pub authorized: RistrettoPoint,                 // Authorized client-key
+    pub profiles: Vec<String>,                      // List of consented profiles (full disclosure)
 
     pub sig: IndSignature,                          // Signature from data-subject
     #[serde(skip)] _phantom: () // force use of constructor
@@ -22,8 +22,8 @@ impl Debug for Consent {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("Consent")
             .field("sid", &self.sid)
-            .field("profiles", &self.profiles)
             .field("authorized", &self.authorized.encode())
+            .field("profiles", &self.profiles)
             .field("sig", &self.sig)
             .finish()
     }
@@ -31,15 +31,15 @@ impl Debug for Consent {
 
 impl Consent {
     pub fn sign(sid: &str, profiles: &[String], authorized: &RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let sig_data = Self::data(sid, profiles, authorized);
+        let sig_data = Self::data(sid, authorized, profiles);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
-        Self { sid: sid.into(), profiles: profiles.to_vec(), authorized: *authorized, sig, _phantom: () }
+        Self { sid: sid.into(), authorized: *authorized, profiles: profiles.to_vec(), sig, _phantom: () }
 
     }
 
     pub fn check(&self, sig_key: &SubjectKey) -> Result<()> {
-        let sig_data = Self::data(&self.sid, &self.profiles, &self.authorized);
+        let sig_data = Self::data(&self.sid, &self.authorized, &self.profiles);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid consent signature!")
         }
@@ -48,13 +48,13 @@ impl Consent {
     }
 
 
-    fn data(sid: &str, profiles: &[String], authorized: &RistrettoPoint) -> [Vec<u8>; 3] {
+    fn data(sid: &str, authorized: &RistrettoPoint, profiles: &[String]) -> [Vec<u8>; 3] {
         // These unwrap() should never fail, or it's a serious code bug!
         let b_sid = bincode::serialize(sid).unwrap();
-        let b_profiles = bincode::serialize(profiles).unwrap();
         let b_authorized = bincode::serialize(authorized).unwrap();
+        let b_profiles = bincode::serialize(profiles).unwrap();
 
-        [b_sid, b_profiles, b_authorized]
+        [b_sid, b_authorized, b_profiles]
     }
 }
 

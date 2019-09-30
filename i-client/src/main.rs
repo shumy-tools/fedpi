@@ -107,7 +107,10 @@ fn main() {
         println!("Reseting {:?}", sid);
         sm.reset();
     } else if matches.is_present("view") {
-        println!("{:#?}", sm.sto);
+        match sm.sto {
+            None => println!("No subject available"),
+            Some(my) => println!("{:#?}", my)
+        }
     } else if matches.is_present("create") {
         if let Err(e) = sm.create() {
             println!("ERROR -> {}", e);

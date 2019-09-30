@@ -1,4 +1,5 @@
 use crate::Result;
+use crate::structs::consents::*;
 use crate::structs::ids::*;
 use crate::structs::records::*;
 use crate::structs::keys::*;
@@ -82,5 +83,8 @@ pub enum Evidence {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
     VSubject(Subject),
+    VConsent(Consent),
+    VRevokeConsent(RevokeConsent),
+
     VNewRecord(NewRecord)
 }

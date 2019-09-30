@@ -165,16 +165,16 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
 
-                let mut profile = Profile::new(typ, lurl);
-                let (p_secret, pkey) = match my.subject.find(typ, lurl) {
-                    None => profile.evolve(&self.sid, &my.secret, skey),
-                    Some(current) => current.evolve(&self.sid, &my.secret, skey)
+                let mut profile = Profile::new(typ);
+                let (p_secret, location) = match my.subject.find(typ) {
+                    None => profile.evolve(&self.sid, &lurl, &my.secret, skey),
+                    Some(current) => current.evolve(&self.sid, &lurl, &my.secret, skey)
                 };
-
-                profile.chain.push(pkey);
                 
+                profile.push(location);
+
                 let mut profile_secrets = HashMap::<String, Scalar>::new();
-                profile_secrets.insert(profile.id(), p_secret);
+                profile_secrets.insert(ProfileLocation::pid(typ, lurl), p_secret);
 
                 let mut sub = Subject::new(&self.sid);
                 sub.push(profile);
@@ -307,8 +307,10 @@ impl Drop for MySubject {
 
 impl Debug for MySubject {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        let p_secrets: Vec<String> = self.profile_secrets.iter().map(|(key, item)| format!("{} -> {}", key, item.encode())).collect();
         fmt.debug_struct("MySubject")
             .field("secret", &self.secret.encode())
+            .field("profile_secrets", &p_secrets)
             .field("subject", &self.subject)
             .finish()
     }

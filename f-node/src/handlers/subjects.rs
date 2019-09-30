@@ -1,23 +1,24 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 use log::info;
 
 use core_fpi::Result;
 use core_fpi::ids::*;
 
+use crate::databases::*;
+
 pub struct SubjectHandler {
-    subjects: HashMap<String, Subject>
+    db: Arc<GlobalDB>
 }
 
 impl SubjectHandler {
-    pub fn new() -> Self {
-        Self { subjects: HashMap::new() }
+    pub fn new(db: Arc<GlobalDB>) -> Self {
+        Self { db }
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
         info!("CHECK-SUBJECT - (sid = {:?})", subject.sid);
         
-        // TODO: find subject in the database
-        let current = self.subjects.get(&subject.sid);
+        let current = self.db.find(&subject.sid);
         subject.check(current)
     }
 
@@ -25,18 +26,6 @@ impl SubjectHandler {
         self.check(&subject)?; // TODO: optimize by using local cache?
         info!("COMMIT-SUBJECT - (sid = {:?})", subject.sid);
         
-        // TODO: find subject in the database
-        let sid = subject.sid.clone();
-        let current = self.subjects.remove(&sid);
-        match current {
-            None => self.subjects.insert(sid, subject),
-            Some(mut current) => {
-                current.merge(subject);
-                info!("MERGED-SUBJECT - (sid = {:?})", current.sid);
-                self.subjects.insert(sid, current)
-            }
-        };
-
-        Ok(())
+        self.db.update(subject)
     }
 }

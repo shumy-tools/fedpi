@@ -6,21 +6,26 @@ use core_fpi::messages::*;
 
 use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
+use crate::handlers::consents::*;
 use crate::config::Config;
+use crate::databases::GlobalDB;
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
+    mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
-    mkey_handler: MasterKeyHandler
+    consents_handler: ConsentHandler
 }
 
 impl Processor {
     pub fn new(cfg: Config) -> Self {
         let cfg = Arc::new(cfg);
+        let db = Arc::new(GlobalDB::new());
         
         Self {
-            subject_handler: SubjectHandler::new(),
-            mkey_handler: MasterKeyHandler::new(cfg.clone())
+            mkey_handler: MasterKeyHandler::new(cfg.clone()),
+            subject_handler: SubjectHandler::new(db.clone()),
+            consents_handler: ConsentHandler::new(db.clone())
         }
     }
 
@@ -57,6 +62,12 @@ impl Processor {
                         error!("CHECK-ERR - Value::VSubject - {:?}", e);
                     e})
                 },
+                Value::VConsent(consent) => {
+                    info!("CHECK - Value::VConsent");
+                    self.consents_handler.check(&consent).map_err(|e|{
+                        error!("CHECK-ERR - Value::VConsent - {:?}", e);
+                    e})
+                },
                 _ => Err("Not implemented!")
             }
         }
@@ -79,6 +90,12 @@ impl Processor {
                     info!("COMMIT - Value::VSubject");
                     self.subject_handler.commit(subject).map_err(|e|{
                         error!("COMMIT-ERR - Value::VSubject - {:?}", e);
+                    e})
+                },
+                Value::VConsent(consent) => {
+                    info!("COMMIT - Value::VConsent");
+                    self.consents_handler.commit(consent).map_err(|e|{
+                        error!("COMMIT-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!")

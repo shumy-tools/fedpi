@@ -28,6 +28,7 @@ impl Debug for Subject {
             .field("sid", &self.sid)
             .field("keys", &self.keys)
             .field("profiles", &self.profiles.values())
+            .field("consents", &self.consents)
             .finish()
     }
 }
@@ -49,23 +50,51 @@ impl Subject {
         }
     }
 
-    pub fn find(&self, typ: &str, lurl: &str) -> Option<&Profile> {
-        let pid = Profile::pid(typ, lurl);
-        self.profiles.get(&pid)
+    pub fn find(&self, typ: &str) -> Option<&Profile> {
+        self.profiles.get(typ)
     }
 
     pub fn push(&mut self, profile: Profile) -> &mut Self {
-        self.profiles.insert(profile.id(), profile);
+        self.profiles.insert(profile.typ.clone(), profile);
         self
     }
 
     pub fn merge(&mut self, update: Subject) {
         self.keys.extend_from_slice(&update.keys);
 
-        for (key, item) in update.profiles.into_iter() {
-            match self.profiles.get_mut(&key) {
-                None => {self.profiles.insert(key, item);},
+        for (typ, item) in update.profiles.into_iter() {
+            match self.profiles.get_mut(&typ) {
+                None => {self.profiles.insert(typ, item);},
                 Some(ref mut current) => current.merge(item)
+            }
+        }
+    }
+
+    pub fn authorize(&mut self, consent: Consent) {
+        if self.sid != consent.sid {
+            // if it executes it's a bug in the code
+            panic!("self.sid != consent.sid");
+        }
+
+        let ckey = consent.authorized.encode();
+        let skey = consent.sig.sig.encoded.clone();
+        let consents = self.consents.entry(ckey).or_insert_with(|| HashMap::<String, Consent>::new());
+        consents.insert(skey, consent);
+    }
+
+    pub fn revoke(&mut self, revoke: RevokeConsent) {
+        if self.sid != revoke.sid {
+            // if it executes it's a bug in the code
+            panic!("self.sid != consent.sid");
+        }
+
+        let ckey = revoke.authorized.encode();
+        let skey = revoke.consent.encoded.clone();
+
+        if let Some(ref mut consents) = self.consents.get_mut(&ckey) {
+            consents.remove(&skey);
+            if consents.is_empty() {
+                self.consents.remove(&ckey);
             }
         }
     }
@@ -137,12 +166,12 @@ impl Subject {
     }
 
     fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
-        for (key, item) in profiles.iter() {
-            if *key != item.id() {
+        for (typ, item) in profiles.iter() {
+            if *typ != item.typ {
                 return Err("Incorrect profile map-key!")
             }
 
-            item.check(sid, current.get(key), sig_key)?;
+            item.check(sid, current.get(typ), sig_key)?;
         }
 
         Ok(())
@@ -156,6 +185,7 @@ impl Subject {
 pub struct SubjectKey {
     pub key: RistrettoPoint,                        // The public key
     pub sig: IndSignature,                          // Signature from the previous key (if exists) for (sid, index, key)
+    
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
@@ -202,54 +232,130 @@ impl SubjectKey {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Profile {
-    pub typ: String,                            // Profile Type ex: HealthCare, Financial, Assets, etc
-    pub lurl: String,                           // Location URL (URL for the profile server)
+    pub typ: String,                                    // Profile Type ex: HealthCare, Financial, Assets, etc
+    pub locations: HashMap<String, ProfileLocation>,    // Location <lurl>
+    
     #[serde(skip)] _phantom: (), // force use of constructor
     
     // TODO: how to manage replicas without using identity keys?
-    pub chain: Vec<ProfileKey>
 }
 
 impl Debug for Profile {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("Profile")
             .field("typ", &self.typ)
+            .field("locations", &self.locations.values())
+            .finish()
+    }
+}
+
+impl Profile {
+    pub fn new(typ: &str) -> Self {
+        Self { typ: typ.into(), ..Default::default() }
+    }
+
+    pub fn find(&self, lurl: &str) -> Option<&ProfileLocation> {
+        self.locations.get(lurl)
+    }
+
+    pub fn evolve(&self, sid: &str, lurl: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileLocation) {
+        match self.locations.get(lurl) {
+            None => {
+                let mut location = ProfileLocation::new(lurl);
+                let (secret, pkey) = location.evolve(sid, &self.typ, sig_s, sig_key);
+                location.chain.push(pkey);
+                (secret, location)
+            },
+            Some(location) => {
+                let (secret, pkey) = location.evolve(sid, &self.typ, sig_s, sig_key);
+
+                let mut location = ProfileLocation::new(lurl);
+                location.chain.push(pkey);
+                (secret, location)
+            }
+        }
+    }
+
+    pub fn push(&mut self, location: ProfileLocation) -> &mut Self {
+        self.locations.insert(location.lurl.clone(), location);
+        self
+    }
+
+    fn merge(&mut self, update: Profile) {
+        for (lurl, item) in update.locations.into_iter() {
+            match self.locations.get_mut(&lurl) {
+                None => {self.locations.insert(lurl, item);},
+                Some(ref mut current) => current.merge(item)
+            }
+        }
+    }
+
+    fn check(&self, sid: &str, current: Option<&Profile>, sig_key: &SubjectKey) -> Result<()> {
+        // TODO: check "typ"?
+
+        for (lurl, item) in self.locations.iter() {
+            if *lurl != item.lurl {
+                return Err("Incorrect profile-location map-key!")
+            }
+
+            let current_location = match current {
+                None => None,
+                Some(current) => current.locations.get(lurl)
+            };
+
+            item.check(sid, &self.typ, current_location, sig_key)?;
+        }
+
+        Ok(())
+    }
+}
+
+//-----------------------------------------------------------------------------------------------------------
+// ProfileLocation
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct ProfileLocation {
+    pub lurl: String,                           // Location URL (URL for the profile server)
+    pub chain: Vec<ProfileKey>,
+
+    #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl Debug for ProfileLocation {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("ProfileLocation")
             .field("lurl", &self.lurl)
             .field("chain", &self.chain)
             .finish()
     }
 }
 
-impl Profile {
-    pub fn id(&self) -> String {
-        Profile::pid(&self.typ, &self.lurl)
-    }
-
+impl ProfileLocation {
     pub fn pid(typ: &str, lurl: &str) -> String {
         format!("{}@{}", typ, lurl).to_string()
     }
 
-    pub fn new(typ: &str, lurl: &str) -> Self {
-        Self { typ: typ.into(), lurl: lurl.into(), ..Default::default() }
+    pub fn new(lurl: &str) -> Self {
+        Self { lurl: lurl.into(), ..Default::default() }
     }
 
-    pub fn evolve(&self, sid: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileKey) {
+    pub fn evolve(&self, sid: &str, typ: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileKey) {
         let secret = rnd_scalar();
         let key = secret * G;
 
         let pkey = match self.chain.last() {
-            None => ProfileKey::sign(sid, &self.typ, &self.lurl, 0, key, sig_s, sig_key),
-            Some(active) => ProfileKey::sign(sid, &self.typ, &self.lurl, active.index + 1, key, sig_s, sig_key)
+            None => ProfileKey::sign(sid, typ, &self.lurl, 0, key, sig_s, sig_key),
+            Some(active) => ProfileKey::sign(sid, typ, &self.lurl, active.index + 1, key, sig_s, sig_key)
         };
 
         (secret, pkey)
     }
 
-    fn merge(&mut self, update: Profile) {
+    fn merge(&mut self, update: ProfileLocation) {
         self.chain.extend(update.chain);
     }
 
-    fn check(&self, sid: &str, current: Option<&Profile>, sig_key: &SubjectKey) -> Result<()> {
+    fn check(&self, sid: &str, typ: &str, current: Option<&ProfileLocation>, sig_key: &SubjectKey) -> Result<()> {
         // check profile
         let mut prev = match current {
             None => {
@@ -257,14 +363,14 @@ impl Profile {
                 -1
             },
             Some(current) => {
-                let pkey = current.chain.last().ok_or("Current profile must have keys!")?;
+                let pkey = current.chain.last().ok_or("Current profile-location must have keys!")?;
                 pkey.index as i32
             }
         };
 
         // check profile keys
         if self.chain.is_empty() {
-            return Err("Profile must have keys!")
+            return Err("Profile-location must have keys!")
         }
 
         for item in self.chain.iter() {
@@ -272,13 +378,14 @@ impl Profile {
                 return Err("ProfileKey is not correcly chained!")
             }
 
-            item.check(sid, &self.typ, &self.lurl, sig_key)?;
+            item.check(sid, typ, &self.lurl, sig_key)?;
             prev = item.index as i32;
         }
 
         Ok(())
     }
 }
+
 
 //-----------------------------------------------------------------------------------------------------------
 // ProfileKey
@@ -288,6 +395,7 @@ pub struct ProfileKey {
     pub index: usize,                       // Profile key index on the vector
     pub key: RistrettoPoint,                // The profile public key
     pub sig: IndSignature,                  // Subject signature for (sid, typ, lurl, index, key)
+    
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
@@ -350,11 +458,11 @@ mod tests {
         let mut new1 = Subject::new(sid);
         let (_, skey1) = new1.evolve(sig_s1);
 
-        let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.chain.push(p1.evolve(sid, &sig_s1, &skey1).1);
+        let mut p1 = Profile::new("Assets");
+        p1.push(p1.evolve(&sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
-        let mut p2 = Profile::new("Finance", "https://profile-url.org");
-        p2.chain.push(p2.evolve(sid, &sig_s1, &skey1).1);
+        let mut p2 = Profile::new("Finance");
+        p2.push(p2.evolve(&sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
         new1
             .push(p1)
@@ -372,8 +480,8 @@ mod tests {
         //--------------------------------------------------
         // Updating Profile
         // -------------------------------------------------
-        let mut p3 = Profile::new("HealthCare", "https://profile-url.org");
-        p3.chain.push(p3.evolve(sid, &sig_s1, &skey1).1);
+        let mut p3 = Profile::new("HealthCare");
+        p3.push(p3.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
         let mut update2 = Subject::new(sid);
         update2.push(p3);
@@ -382,10 +490,10 @@ mod tests {
         //--------------------------------------------------
         // Updating ProfileKey
         // -------------------------------------------------
-        let p2 = new1.find("Finance", "https://profile-url.org").unwrap().clone();
+        let p2 = new1.find("Finance").unwrap().clone();
 
-        let mut empty_p2 = Profile::new("Finance", "https://profile-url.org");
-        empty_p2.chain.push(p2.evolve(sid, &sig_s1, &skey1).1);
+        let mut empty_p2 = Profile::new("Finance");
+        empty_p2.push(p2.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
         let mut update3 = Subject::new(sid);
         update3.push(empty_p2.clone());
@@ -396,8 +504,8 @@ mod tests {
         // -------------------------------------------------
         new1.merge(update3);
 
-        let mut empty_p3 = Profile::new("Finance", "https://profile-url.org");
-        empty_p3.chain.push(empty_p2.evolve(sid, &sig_s1, &skey1).1);
+        let mut empty_p3 = Profile::new("Finance");
+        empty_p3.push(empty_p2.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
         let mut update4 = Subject::new(sid);
         update4.push(empty_p3);
@@ -416,8 +524,8 @@ mod tests {
         let mut new1 = Subject::new(sid);
         let (_, skey1) = new1.evolve(sig_s1);
         
-        let mut p1 = Profile::new("Assets", "https://profile-url.org");
-        p1.chain.push(p1.evolve(sid, &sig_s1, &skey1).1);
+        let mut p1 = Profile::new("Assets");
+        p1.push(p1.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
 
         new1
             .push(p1.clone())
@@ -455,12 +563,11 @@ mod tests {
         //--------------------------------------------------
         // Updating Profile
         // -------------------------------------------------
-        let mut p2 = Profile::new("Assets", "https://profile-url.org");
-        let mut p2_key = p1.evolve(sid, &sig_s1, &skey1).1;
-        p2_key.index = 0;
-        p2.chain.push(p2_key);
-
-        //p2.new_key(sid, 0, &sig_s1, &new1.keys.last().unwrap());
+        let mut p2 = Profile::new("Assets");
+        let mut p2_loc = p1.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1;
+        let mut p2_key = &mut p2_loc.chain[0];
+        p2_key.index = 0usize;
+        p2.push(p2_loc);
 
         let mut update1 = Subject::new(sid);
         update1.push(p2);
