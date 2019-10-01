@@ -20,7 +20,9 @@ pub struct Processor {
 impl Processor {
     pub fn new(cfg: Config) -> Self {
         let cfg = Arc::new(cfg);
-        let db = Arc::new(GlobalDB::new());
+
+        let db_file = format!("{}/data/app.db", cfg.home);
+        let db = Arc::new(GlobalDB::new(&db_file));
         
         Self {
             mkey_handler: MasterKeyHandler::new(cfg.clone()),
@@ -68,7 +70,7 @@ impl Processor {
                         error!("CHECK-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
-                _ => Err("Not implemented!")
+                _ => Err("Not implemented!".into())
             }
         }
     }
@@ -98,7 +100,7 @@ impl Processor {
                         error!("COMMIT-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
-                _ => Err("Not implemented!")
+                _ => Err("Not implemented!".into())
             }
         }
     }

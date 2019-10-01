@@ -1,57 +1,104 @@
-use std::sync::Mutex;
-use std::collections::HashMap;
-use log::info;
+use sled::{Db, IVec, TransactionError, TransactionalTree};
+use std::rc::Rc;
+use std::cell::RefCell;
 
-use core_fpi::Result;
-use core_fpi::consents::*;
+use serde::{Serialize, Deserialize};
+use log::error;
+
+use core_fpi::{ID, Result};
 use core_fpi::ids::*;
+use core_fpi::messages::{encode, decode};
 
 //--------------------------------------------------------------------
 // LocalDB where local secret are stored
 //--------------------------------------------------------------------
-pub struct LocalDB {
+/*pub struct LocalDB {
 
-}
+}*/
 
 //--------------------------------------------------------------------
 // GlobalDB where the consensus results are stored 
 //--------------------------------------------------------------------
 pub struct GlobalDB {
-    subjects: Mutex<HashMap<String, Subject>>
+    db: Db
 }
 
 impl GlobalDB {
-    pub fn new() -> Self {
-        Self { subjects: Mutex::new(HashMap::new()) }
+    pub fn new(path: &str) -> Self {
+        // nothing to do here, just let it panic
+        let tree = Db::open(path).unwrap();
+        Self { db: tree }
     }
 
-    pub fn find(&self, sid: &str) -> Option<Subject> {
-        let guard = self.subjects.lock().unwrap();
-        
-        match guard.get(sid) {
-            None => None,
-            Some(sub) => Some(sub.clone())
+    /*pub fn get<'a, T: Deserialize<'a>>(&self, id: &str) -> Result<Option<T>> {
+        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get id: {}", e))?;
+        match res {
+            None => Ok(None),
+            Some(data) => {
+                let obj: T = decode(&data)?;
+                Ok(Some(obj))
+            }
+        }
+    }*/
+
+
+    pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
+        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get id: {}", e))?;
+        match res {
+            None => Ok(None),
+            Some(data) => {
+                let obj: Subject = decode(&data)?;
+                Ok(Some(obj))
+            }
         }
     }
 
-    pub fn update(&self, subject: Subject) -> Result<()> {
-        let guard = self.subjects.lock().unwrap();
-
-        let sid = subject.sid.clone();
-        let current = guard.remove(&sid);
-        match current {
-            None => guard.insert(sid, subject),
-            Some(mut current) => {
-                current.merge(subject);
-                info!("UPDATED-SUBJECT - (sid = {:?})", current.sid);
-                guard.insert(sid, current)
+    /*pub fn get_consent(&self, id: &str) -> Result<Option<Consent>> {
+        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get id: {}", e))?;
+        match res {
+            None => Ok(None),
+            Some(data) => {
+                let obj: Consent = decode(&data)?;
+                Ok(Some(obj))
             }
-        };
+        }
+    }*/
 
-        Ok(())
+    pub fn tx<T: FnOnce(DbTx) -> Result<()>>(&self, commit: T) -> Result<()> {
+        // BIG fucking hack so I can call the closure!!!
+        let commit = Rc::new(RefCell::new(Some(commit)));
+        self.db.transaction(move |db| {
+            let call = commit.borrow_mut().take().unwrap();
+            call(DbTx(db)).map_err(|e| {
+                error!("tx-abort: {}", e);
+                TransactionError::Abort
+            })?;
+
+            Ok(())
+        }).map_err(|e| format!("Unable to save structure: {}", e))
     }
 
-    pub fn authorize(&self, consent: Consent) -> Result<()> {
+    pub fn set<T: Serialize + ID>(&self, obj: T) -> Result<()> {
+        let data = encode(&obj)?;
+        self.save(obj.id(), &data)
+    }
+
+    pub fn save(&self, id: &str, data: &[u8]) -> Result<()> {
+        self.db.insert(id, data).map_err(|e| format!("Unable to save structure: {}", e))?;
+        Ok(())
+    }
+}
+
+pub struct DbTx<'a> (pub &'a TransactionalTree);
+
+impl<'a> DbTx<'a> {
+    pub fn set<T: Serialize + ID>(&self, obj: T) -> Result<()> {
+        let data = encode(&obj)?;
+        self.save(obj.id(), &data)
+    }
+
+    pub fn save(&self, id: &str, data: &[u8]) -> Result<()> {
+        self.0.insert(id, data).map_err(|e| format!("Unable to save structure: {}", e))?;
         Ok(())
     }
 }

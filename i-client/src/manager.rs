@@ -9,8 +9,9 @@ use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
+use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, HardKeyDecoder, RistrettoPoint};
 use core_fpi::ids::*;
+use core_fpi::consents::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
 
@@ -186,6 +187,23 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         }
     }
 
+    pub fn consent(&mut self, auth: &str, profiles: &[String]) -> Result<()> {
+        self.check_pending()?;
+        
+        match &self.sto {
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            Some(my) => {
+                let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+                let authorized: RistrettoPoint = auth.to_string().decode();
+
+                let consent = Consent::sign(&self.sid, profiles, &authorized, &my.secret, skey);
+                consent.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
+
+                self.sync_consent(consent)
+            }
+        }
+    }
+
     pub fn negotiate(&mut self) -> Result<()> {
         let session = uuid();
         let n = self.config.peers.len();
@@ -280,6 +298,28 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         Storage::store(&self.home, &self.sid, SType::Stored, &merged)?;
         self.sto = Some(merged);
         Storage::clean(&self.home, &sid);
+
+        Ok(())
+    }
+
+    fn sync_consent(&mut self, consent: Consent) -> Result<()> {
+        // select a random peer
+        use rand::seq::SliceRandom;
+        let selection = self.config.peers.choose(&mut rand::thread_rng());
+
+        // process sync message
+        match selection {
+            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
+            Some(sel) => (self.commit)(&sel, Commit::Value(Value::VConsent(consent.clone())))?
+        }
+
+        // store final result
+        let mut merged = self.sto.take().unwrap();
+        merged.subject.authorize(&consent);
+
+        Storage::store(&self.home, &self.sid, SType::Stored, &merged)?;
+        self.sto = Some(merged);
+        Storage::clean(&self.home, &self.sid);
 
         Ok(())
     }

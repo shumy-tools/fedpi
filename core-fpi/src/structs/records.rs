@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::Signature;
-use crate::{OPEN, CLOSE, Result, Scalar, RistrettoPoint};
+use crate::{OPEN, CLOSE, ID, Result, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record
@@ -14,11 +14,13 @@ pub struct Record {
     _phantom: () // force use of constructor
 }
 
-impl Record {
-    pub fn id(&self) -> &String {
+impl ID for Record {
+    fn id(&self) -> &str {
         &self.sig.encoded
     }
+}
 
+impl Record {
     pub fn sign(prev: &str, data: Vec<u8>, base: &RistrettoPoint, secret: &Scalar, pseudonym: &RistrettoPoint) -> Self {
         let sig_data = Self::data(&prev, &data);
         let sig = Signature::sign(secret, pseudonym, base, &sig_data);
@@ -29,7 +31,7 @@ impl Record {
     pub fn check(&self, last: Option<&Record>, base: &RistrettoPoint, pseudonym: &RistrettoPoint) -> Result<()> {
         let prev = match last {
             None => if self.prev != OPEN {
-                return Err("Record not marked as Open!")
+                return Err("Record not marked as open!".into())
             } else {
                 OPEN
             },
@@ -37,17 +39,17 @@ impl Record {
             Some(last) => {
                 // TODO: verify if the stream is not closed?
                 if String::from_utf8_lossy(&last.data) == CLOSE {
-                    return Err("The stream is closed!")
+                    return Err("The stream is closed!".into())
                 }
 
                 if self.prev != *last.id() {
-                    return Err("Record is not part of the stream!")
+                    return Err("Record is not part of the stream!".into())
                 }
 
                 // verify signature of last record with the same key. The chain must have the same key.
                 let sig_data = Self::data(&last.prev, &last.data);
                 if !self.sig.verify(pseudonym, base, &sig_data) {
-                    return Err("Last record doesn't match the key for the signature!")
+                    return Err("Last record doesn't match the key for the signature!".into())
                 }
 
                 self.prev.as_ref()
@@ -57,7 +59,7 @@ impl Record {
         // verify the record signature
         let sig_data = Self::data(&prev, &self.data);
         if !self.sig.verify(pseudonym, base, &sig_data) {
-            return Err("Invalid record signature!")
+            return Err("Invalid record signature!".into())
         }
 
         Ok(())
@@ -111,13 +113,13 @@ mod tests {
 
         let r_data1 = "next data1".as_bytes().to_vec();
         let record1 = Record::sign(OPEN, r_data1, &base, &secret, &pseudonym);
-        assert!(record1.check(Some(&record), &base, &pseudonym) == Err("Record is not part of the stream!"));
+        assert!(record1.check(Some(&record), &base, &pseudonym) == Err("Record is not part of the stream!".into()));
 
         let secret1 = rnd_scalar();
         let pseudonym1 = secret1 * base;
 
         let r_data2 = "next data2".as_bytes().to_vec();
         let record2 = Record::sign(record.id(), r_data2, &base, &secret1, &pseudonym1);
-        assert!(record2.check(Some(&record), &base, &pseudonym) == Err("Last record doesn't match the key for the signature!"));
+        assert!(record2.check(Some(&record), &base, &pseudonym) == Err("Last record doesn't match the key for the signature!".into()));
     }
 }

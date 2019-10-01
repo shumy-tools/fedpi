@@ -84,19 +84,19 @@ impl MasterKeyVote {
 
     pub fn check(&self, session: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
         if self.session != session {
-            return Err("KeyResponse, expected the same session!")
+            return Err("KeyResponse, expected the same session!".into())
         }
 
         if self.shares.len() != n || self.pkeys.len() != n {
-            return Err("KeyResponse, expected vectors with the same lenght (shares, pkeys)!")
+            return Err("KeyResponse, expected vectors with the same lenght (shares, pkeys)!".into())
         }
 
         if self.peers != peers {
-            return Err("KeyResponse, expected the same peers!")
+            return Err("KeyResponse, expected the same peers!".into())
         }
 
         if !self.verify(pkey) {
-            return Err("KeyResponse with invalid signature!")
+            return Err("KeyResponse with invalid signature!".into())
         }
 
         // it's assured that all vectors are of the same size
@@ -107,7 +107,7 @@ impl MasterKeyVote {
             // (e_i * G - P_i) -> Y_i
             let Yi = &(&self.shares[i] * &G) - &self.pkeys[i];
             if !self.commit.verify(&Yi) {
-                return Err("KeyResponse with invalid shares!")
+                return Err("KeyResponse with invalid shares!".into())
             }
         }
 
@@ -148,7 +148,7 @@ impl MasterKey {
     pub fn sign(session: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Result<Self> {
         // expecting responses from all peers
         if votes.len() != n {
-            return Err("Expecting responses from all peers!")
+            return Err("Expecting responses from all peers!".into())
         }
 
         // check all peer responses
@@ -173,11 +173,11 @@ impl MasterKey {
 
     pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
         if self.votes.len() != n {
-            return Err("Expecting votes from all peers!")
+            return Err("Expecting votes from all peers!".into())
         }
 
         if !self.verify() {
-            return Err("MasterKey with invalid signature!")
+            return Err("MasterKey with invalid signature!".into())
         }
 
         // check matrix bounds before use
@@ -261,7 +261,7 @@ impl PublicMatrix {
             let mut line = Vec::<RistrettoPoint>::with_capacity(n-i);
             for j in 0..n {
                 if res[i].pkeys[j] != res[j].pkeys[i] {
-                    return Err("Expecting a symmetric public-matrix!")
+                    return Err("Expecting a symmetric public-matrix!".into())
                 }
 
                 if j >= i {
@@ -277,13 +277,13 @@ impl PublicMatrix {
 
     fn check(&self, length: usize) -> Result<()> {
         if self.triangle.len() != length {
-            return Err("MasterKey matrix of incorrect size!")
+            return Err("MasterKey matrix of incorrect size!".into())
         }
 
         // check if it's a triangular matrix
         for i in 0..length {
             if self.triangle[i].len() != length - i {
-                return Err("MasterKey matrix with incorrect triangle!")
+                return Err("MasterKey matrix with incorrect triangle!".into())
             }
         }
 

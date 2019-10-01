@@ -33,6 +33,8 @@ pub struct Peer {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub home: String,
+
     pub name: String,
     pub index: usize,
     pub secret: Scalar,
@@ -91,6 +93,8 @@ impl Config {
         };
 
         Self {
+            home: home.into(),
+
             name: t_cfg.name,
             index,
             secret: t_cfg.secret.decode(),

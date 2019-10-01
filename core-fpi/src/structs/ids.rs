@@ -1,11 +1,11 @@
 use std::fmt::{Debug, Formatter};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::IndSignature;
 use crate::consents::*;
-use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
+use crate::{G, rnd_scalar, ID, Result, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
@@ -16,10 +16,16 @@ pub struct Subject {
     pub keys: Vec<SubjectKey>,                                  // All subject keys
 
     pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
-    pub consents: HashMap<String, HashMap<String, Consent>>,    // All profile consents per client <authorized-key: <consent-signature>>
+    pub consents: HashMap<String, HashSet<String>>,             // All profile consents per client <authorized-key: <profile>>
     // revoked consents should not be part of the consent list, although those are still recorded in the DB
 
     #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl ID for Subject {
+    fn id(&self) -> &str {
+        &self.sid
+    }
 }
 
 impl Debug for Subject {
@@ -70,43 +76,41 @@ impl Subject {
         }
     }
 
-    pub fn authorize(&mut self, consent: Consent) {
+    pub fn authorize(&mut self, consent: &Consent) {
         if self.sid != consent.sid {
             // if it executes it's a bug in the code
             panic!("self.sid != consent.sid");
         }
 
         let ckey = consent.authorized.encode();
-        let skey = consent.sig.sig.encoded.clone();
-        let consents = self.consents.entry(ckey).or_insert_with(|| HashMap::<String, Consent>::new());
-        consents.insert(skey, consent);
+        let consents = self.consents.entry(ckey).or_insert_with(|| HashSet::<String>::new());
+        for item in consent.profiles.iter() {
+            consents.insert(item.clone());
+        }
     }
 
-    pub fn revoke(&mut self, revoke: RevokeConsent) {
+    pub fn revoke(&mut self, revoke: &Consent) {
         if self.sid != revoke.sid {
             // if it executes it's a bug in the code
-            panic!("self.sid != consent.sid");
+            panic!("self.sid != revoke.sid");
         }
 
         let ckey = revoke.authorized.encode();
-        let skey = revoke.consent.encoded.clone();
-
         if let Some(ref mut consents) = self.consents.get_mut(&ckey) {
-            consents.remove(&skey);
-            if consents.is_empty() {
-                self.consents.remove(&ckey);
+            for item in revoke.profiles.iter() {
+                consents.remove(item);
             }
         }
     }
 
-    pub fn check(&self, current: Option<&Subject>) -> Result<()> {
+    pub fn check(&self, current: Option<Subject>) -> Result<()> {
         match current {
             None => self.check_create(),
-            Some(current) => {
+            Some(ref current) => {
                 match self.keys.len() {
                     0 => self.check_update(current),
                     1 => self.check_evolve(current),
-                    _ => Err("Incorrect number of keys for subject sync!")
+                    _ => Err("Incorrect number of keys for subject sync!".into())
                 }
             }
         }
@@ -119,7 +123,7 @@ impl Subject {
         // if it reaches here it must have one key with index 0
         let active_key = self.keys.last().ok_or("No key found for subject creation!")?;
         if active_key.sig.index != 0 {
-            return Err("Incorrect key index for subject creation!")
+            return Err("Incorrect key index for subject creation!".into())
         }
 
         // a self-signed SubjectKey
@@ -136,13 +140,13 @@ impl Subject {
         let new_key = self.keys.last().ok_or("No subject-key at expected index!")?;
 
         if active_key.sig.index + 1 != new_key.sig.index {
-            return Err("Incorrect index for new subject-key!")
+            return Err("Incorrect index for new subject-key!".into())
         }
 
         new_key.check(&self.sid, active_key)?;
 
         if !self.profiles.is_empty() {
-            return Err("Subject key-evolution cannot have profiles!")
+            return Err("Subject key-evolution cannot have profiles!".into())
         }
 
         Ok(())
@@ -151,7 +155,7 @@ impl Subject {
     fn check_update(&self, current: &Subject) -> Result<()> {
         if self.sid != current.sid {
             // if it executes it's a bug in the code
-            return Err("self.sid != update.sid")
+            return Err("self.sid != update.sid".into())
         }
 
         // get active key for subject
@@ -159,7 +163,7 @@ impl Subject {
 
         // check profiles
         if self.profiles.is_empty() {
-            return Err("Subject update must have at least one profile!")
+            return Err("Subject update must have at least one profile!".into())
         }
 
         Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
@@ -168,7 +172,7 @@ impl Subject {
     fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
         for (typ, item) in profiles.iter() {
             if *typ != item.typ {
-                return Err("Incorrect profile map-key!")
+                return Err("Incorrect profile map-key!".into())
             }
 
             item.check(sid, current.get(typ), sig_key)?;
@@ -209,7 +213,7 @@ impl SubjectKey {
     fn check(&self, sid: &str, sig_key: &SubjectKey) -> Result<()> {
         let sig_data = Self::data(sid, self.sig.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid subject-key signature!")
+            return Err("Invalid subject-key signature!".into())
         }
 
         Ok(())
@@ -295,7 +299,7 @@ impl Profile {
 
         for (lurl, item) in self.locations.iter() {
             if *lurl != item.lurl {
-                return Err("Incorrect profile-location map-key!")
+                return Err("Incorrect profile-location map-key!".into())
             }
 
             let current_location = match current {
@@ -370,12 +374,12 @@ impl ProfileLocation {
 
         // check profile keys
         if self.chain.is_empty() {
-            return Err("Profile-location must have keys!")
+            return Err("Profile-location must have keys!".into())
         }
 
         for item in self.chain.iter() {
             if prev + 1 != item.index as i32 {
-                return Err("ProfileKey is not correcly chained!")
+                return Err("ProfileKey is not correcly chained!".into())
             }
 
             item.check(sid, typ, &self.lurl, sig_key)?;
@@ -420,7 +424,7 @@ impl ProfileKey {
     fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
         let sig_data = Self::data(sid, typ, lurl, self.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid profile-key signature!")
+            return Err("Invalid profile-key signature!".into())
         }
 
         Ok(())
@@ -475,7 +479,7 @@ mod tests {
         // -------------------------------------------------
         let mut update1 = Subject::new(sid);
         update1.keys.push(new1.evolve(sig_s1).1);
-        assert!(update1.check(Some(&new1)) == Ok(()));
+        assert!(update1.check(Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
         // Updating Profile
@@ -485,7 +489,7 @@ mod tests {
 
         let mut update2 = Subject::new(sid);
         update2.push(p3);
-        assert!(update2.check(Some(&new1)) == Ok(()));
+        assert!(update2.check(Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
         // Updating ProfileKey
@@ -497,7 +501,7 @@ mod tests {
 
         let mut update3 = Subject::new(sid);
         update3.push(empty_p2.clone());
-        assert!(update3.check(Some(&new1)) == Ok(()));
+        assert!(update3.check(Some(new1.clone())) == Ok(()));
         
         //--------------------------------------------------
         // Merge and update
@@ -509,7 +513,7 @@ mod tests {
 
         let mut update4 = Subject::new(sid);
         update4.push(empty_p3);
-        assert!(update4.check(Some(&new1)) == Ok(()));
+        assert!(update4.check(Some(new1.clone())) == Ok(()));
 
         // println!("ERROR: {:?}", subject3.check(Some(&subject1)));
     }
@@ -536,11 +540,11 @@ mod tests {
         // Creating Subject
         // -------------------------------------------------
         let incorrect = Subject::new(sid);
-        assert!(incorrect.check(None) == Err("No key found for subject creation!"));
+        assert!(incorrect.check(None) == Err("No key found for subject creation!".into()));
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(SubjectKey::sign(sid, 1, sig_key1, &sig_s1, &sig_key1));
-        assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!"));
+        assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!".into()));
 
         //--------------------------------------------------
         // Evolving SubjectKey
@@ -554,11 +558,11 @@ mod tests {
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey2);
-        assert!(incorrect.check(Some(&new1)) == Err("Incorrect index for new subject-key!"));
+        assert!(incorrect.check(Some(new1.clone())) == Err("Incorrect index for new subject-key!".into()));
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey3);
-        assert!(incorrect.check(Some(&new1)) == Err("Invalid subject-key signature!"));
+        assert!(incorrect.check(Some(new1.clone())) == Err("Invalid subject-key signature!".into()));
 
         //--------------------------------------------------
         // Updating Profile
@@ -571,7 +575,7 @@ mod tests {
 
         let mut update1 = Subject::new(sid);
         update1.push(p2);
-        assert!(update1.check(Some(&new1)) == Err("ProfileKey is not correcly chained!"));
+        assert!(update1.check(Some(new1.clone())) == Err("ProfileKey is not correcly chained!".into()));
 
     }
 }

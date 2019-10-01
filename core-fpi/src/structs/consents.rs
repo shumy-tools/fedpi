@@ -1,9 +1,9 @@
 use std::fmt::{Debug, Formatter};
 use serde::{Serialize, Deserialize};
 
+use crate::ids::*;
 use crate::crypto::signatures::{Signature, IndSignature};
-use crate::ids::SubjectKey;
-use crate::{Result, KeyEncoder, Scalar, RistrettoPoint};
+use crate::{Result, ID, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject Consent
@@ -16,6 +16,12 @@ pub struct Consent {
 
     pub sig: IndSignature,                          // Signature from data-subject
     #[serde(skip)] _phantom: () // force use of constructor
+}
+
+impl ID for Consent {
+    fn id(&self) -> &str {
+        &self.sig.sig.encoded
+    }
 }
 
 impl Debug for Consent {
@@ -35,13 +41,21 @@ impl Consent {
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
         Self { sid: sid.into(), authorized: *authorized, profiles: profiles.to_vec(), sig, _phantom: () }
-
     }
 
-    pub fn check(&self, sig_key: &SubjectKey) -> Result<()> {
+    pub fn check(&self, subject: &Subject) -> Result<()> {
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+
         let sig_data = Self::data(&self.sid, &self.authorized, &self.profiles);
-        if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid consent signature!")
+        if !self.sig.verify(&skey.key, &sig_data) {
+            return Err("Invalid consent signature!".into())
+        }
+
+        // check for existing profiles in subject
+        for item in self.profiles.iter() {
+            if !subject.profiles.contains_key(item) {
+                return Err(format!("No profile found: {}", item))
+            }
         }
 
         Ok(())
@@ -83,7 +97,7 @@ impl RevokeConsent {
     pub fn check(&self, sig_key: &SubjectKey) -> Result<()> {
         let sig_data = Self::data(&self.sid, &self.authorized, &self.consent);
         if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid consent signature!")
+            return Err("Invalid consent signature!".into())
         }
 
         Ok(())

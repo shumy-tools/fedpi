@@ -8,19 +8,19 @@ use log::error;
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 
-pub fn decode<'a, T: Sized + Deserialize<'a>>(data: &'a [u8]) -> Result<T> {
+pub fn decode<'a, T: Deserialize<'a>>(data: &'a [u8]) -> Result<T> {
     let msg: T = deserialize(data).map_err(|err| {
-        error!("{:?} - {:?}", "Unable to decode message!", err);
-        "Unable to decode message!"
+        error!("{:?} - {:?}", "Unable to decode structure!", err);
+        "Unable to decode structure!"
     })?;
 
     Ok(msg)
 }
 
-pub fn encode<T: Sized + Serialize>(msg: &T) -> Result<Vec<u8>> {
+pub fn encode<T: Serialize>(msg: &T) -> Result<Vec<u8>> {
     let data = serialize(msg).map_err(|err| {
-        error!("{:?} - {:?}", "Unable to encode message!", err);
-        "Unable to encode message!"
+        error!("{:?} - {:?}", "Unable to encode structure!", err);
+        "Unable to encode structure!"
     })?;
     
     Ok(data)

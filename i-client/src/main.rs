@@ -36,6 +36,8 @@ fn main() {
             .about("Request the creation of a subject"))
         .subcommand(SubCommand::with_name("evolve")
             .about("Request the evolution of the subject key"))
+        .subcommand(SubCommand::with_name("negotiate-key")
+            .about("Fires the negotiation protocol to create a master key"))
         .subcommand(SubCommand::with_name("profile")
             .about("Request the creation or evolution of the subject profile")
             .arg(Arg::with_name("type")
@@ -46,8 +48,17 @@ fn main() {
                 .help("Selects the profile location URL")
                 .takes_value(true)
                 .required(true)))
-        .subcommand(SubCommand::with_name("negotiate-key")
-            .about("Fires the negotiation protocol to create a master key"))
+        .subcommand(SubCommand::with_name("consent")
+            .about("Authorize full-disclosure to a client-key for a set of profiles")
+            .arg(Arg::with_name("auth")
+                .help("Authorized key")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("profiles")
+                .help("Selects the profile location URL")
+                .min_values(1)
+                .takes_value(true)
+                .required(true)))
         .get_matches();
     
     let home = matches.value_of("home").unwrap_or(".");
@@ -65,14 +76,21 @@ fn main() {
         let url = format!("{}/broadcast_tx_commit?tx={:?}", peer.host, data);
         
         let mut resp = reqwest::get(url.as_str()).map_err(|_| Error::new(ErrorKind::Other, "Unable to commit to network!"))?;
+        //println!("RES: {:?}", resp.text());
         let res: TxResult = resp.json().map_err(|e| Error::new(ErrorKind::Other, format!("Unable to parse JSON - {:?}", e)))?;
 
-        if res.result.check_tx.code != 0 {
-            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On check: {}", res.result.check_tx.log)))
+        if let Some(error) = res.error {
+            return Err(Error::new(ErrorKind::Other, format!("Transaction {:?} from network: {}", error.message, error.data)))
         }
 
-        if res.result.deliver_tx.code != 0 {
-            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On deliver: {}", res.result.deliver_tx.log)))
+        let result = res.result.unwrap();
+
+        if result.check_tx.code != 0 {
+            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On check: {}", result.check_tx.log)))
+        }
+
+        if result.deliver_tx.code != 0 {
+            return Err(Error::new(ErrorKind::Other, format!("Transaction error from network. On deliver: {}", result.deliver_tx.log)))
         }
 
         Ok(())
@@ -117,6 +135,10 @@ fn main() {
         }
     } else if matches.is_present("evolve") {
         sm.evolve().unwrap();
+    } else if matches.is_present("negotiate-key") {
+        if let Err(e) = sm.negotiate() {
+            println!("ERROR -> {}", e);
+        }
     } else if matches.is_present("profile") {
         let matches = matches.subcommand_matches("profile").unwrap();
         let typ = matches.value_of("type").unwrap().to_owned();
@@ -125,8 +147,13 @@ fn main() {
         if let Err(e) = sm.profile(&typ, &lurl) {
             println!("ERROR -> {}", e);
         }
-    } else if matches.is_present("negotiate-key") {
-        if let Err(e) = sm.negotiate() {
+    }  else if matches.is_present("consent") {
+        let matches = matches.subcommand_matches("consent").unwrap();
+        let auth = matches.value_of("auth").unwrap().to_owned();
+        let profiles: Vec<&str> = matches.values_of("profiles").unwrap().collect();
+        let profiles: Vec<String> = profiles.iter().map(|v| v.to_string()).collect();
+
+        if let Err(e) = sm.consent(&auth, &profiles) {
             println!("ERROR -> {}", e);
         }
     }
@@ -136,15 +163,23 @@ fn main() {
 struct TxResult {
     jsonrpc: String,
     id: String,
-    result: TxResultBody
+    result: Option<TxResultOk>,
+    error: Option<TxResultError>
 }
 
 #[derive(Deserialize, Debug)]
-struct TxResultBody {
+struct TxResultOk {
     check_tx: CheckTxResult,
     deliver_tx: DeliverTxResult,
     hash: String,
     height: String
+}
+
+#[derive(Deserialize, Debug)]
+struct TxResultError {
+    code: i32,
+    message: String,
+    data: String
 }
 
 #[derive(Deserialize, Debug)]

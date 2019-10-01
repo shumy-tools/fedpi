@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use log::info;
 
-use core_fpi::Result;
+use core_fpi::{ID, Result};
 use core_fpi::ids::*;
 
 use crate::databases::*;
@@ -18,7 +18,7 @@ impl SubjectHandler {
     pub fn check(&self, subject: &Subject) -> Result<()> {
         info!("CHECK-SUBJECT - (sid = {:?})", subject.sid);
         
-        let current = self.db.find(&subject.sid);
+        let current: Option<Subject> = self.db.get_subject(subject.id())?;
         subject.check(current)
     }
 
@@ -26,6 +26,13 @@ impl SubjectHandler {
         self.check(&subject)?; // TODO: optimize by using local cache?
         info!("COMMIT-SUBJECT - (sid = {:?})", subject.sid);
         
-        self.db.update(subject)
+        let current: Option<Subject> = self.db.get_subject(subject.id())?;
+        match current {
+            None => self.db.set(subject),
+            Some(mut current) => {
+                current.merge(subject);
+                self.db.set(current)
+            }
+        }
     }
 }

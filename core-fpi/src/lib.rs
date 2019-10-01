@@ -20,7 +20,7 @@ pub const G_TABLE: RistrettoBasepointTable = RISTRETTO_BASEPOINT_TABLE;
 pub const OPEN: &str = "OPEN";
 pub const CLOSE: &str = "CLOSE";
 
-pub type Result<T> = std::result::Result<T, &'static str>;
+pub type Result<T> = std::result::Result<T, String>;
 
 /*impl From<&'static str> for std::io::Error {
     fn from(msg: &'static str) -> Self {

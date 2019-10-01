@@ -24,7 +24,7 @@ impl MasterKeyHandler {
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         // verify if the client has authorization to fire negotiation
         if req.sig.key != self.config.admin || !req.verify() {
-            return Err("Client has not authorization to negotiate master-key!")
+            return Err("Client has not authorization to negotiate master-key!".into())
         }
 
         if let Some(vote) = &self.vote {
@@ -51,7 +51,7 @@ impl MasterKeyHandler {
 
         // verify if the client has authorization to commit evidence (signature is verified on check)
         if mkey.sig.key != self.config.admin {
-            return Err("Client has not authorization to commit master-key evidence!")
+            return Err("Client has not authorization to commit master-key evidence!".into())
         }
 
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
@@ -68,7 +68,7 @@ impl MasterKeyHandler {
         let e_keys = self.derive_encryption_keys(&mkey.session);        // encryption keys (e_i)
 
         if e_shares.0.len() != n || e_keys.0.len() != n {
-            return Err("Incorrect sizes on MasterKey commit (#e_shares != n || #e_keys != n)!")
+            return Err("Incorrect sizes on MasterKey commit (#e_shares != n || #e_keys != n)!".into())
         }
 
         // recover an check encrypted shares
@@ -76,14 +76,14 @@ impl MasterKeyHandler {
         let mut shares = Vec::<Share>::with_capacity(n);
         for (i, e_i) in e_keys.0.iter().enumerate() {
             if e_shares.0[i].i != share_index {
-                return Err("Invalid share index!")
+                return Err("Invalid share index!".into())
             }
 
             let share = &e_shares.0[i] - e_i;
             let r_share = &share * &G;
 
             if !e_shares.1[i].verify(&r_share) {
-                return Err("Invalid recovered share!")
+                return Err("Invalid recovered share!".into())
             }
 
             shares.push(share);
