@@ -16,7 +16,7 @@ impl SubjectHandler {
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
-        info!("CHECK-SUBJECT - (sid = {:?})", subject.sid);
+        info!("CHECK-SUBJECT - (id = {:?}, #keys = {:?}, #profiles = {:?}, #auths = {:?})", subject.id(), subject.keys.len(), subject.profiles.len(), subject.authorizations.len());
         
         let current: Option<Subject> = self.db.get_subject(subject.id())?;
         subject.check(current)
@@ -24,7 +24,7 @@ impl SubjectHandler {
 
     pub fn commit(&mut self, subject: Subject) -> Result<()> {
         //self.check(&subject)?;
-        info!("COMMIT-SUBJECT - (sid = {:?})", subject.sid);
+        info!("COMMIT-SUBJECT - (id = {:?})", subject.id());
         
         let current: Option<Subject> = self.db.get_subject(subject.id())?;
         match current {

@@ -47,7 +47,7 @@ impl MasterKeyHandler {
     }
 
     pub fn check(&self, mkey: &MasterKey) -> Result<()> {
-        info!("CHECK-KEY - (session = {:#?})", mkey.session);
+        info!("CHECK-KEY - (session = {:?}, #votes = {:?})", mkey.session, mkey.votes.len());
 
         // verify if the client has authorization to commit evidence (signature is verified on check)
         if mkey.sig.key != self.config.admin {
@@ -60,7 +60,7 @@ impl MasterKeyHandler {
 
     pub fn commit(&mut self, mkey: MasterKey) -> Result<()> {
         //self.check(&mkey)?;
-        info!("COMMIT-KEY - (session = {:#?})", mkey.session);
+        info!("COMMIT-KEY - (session = {:?})", mkey.session);
         
         let n = self.config.peers.len();
 

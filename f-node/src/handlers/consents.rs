@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use log::info;
 
-use core_fpi::Result;
+use core_fpi::{Result, ID, KeyEncoder};
 use core_fpi::ids::*;
 use core_fpi::consents::*;
 
@@ -17,14 +17,14 @@ impl ConsentHandler {
     }
 
     pub fn check_consent(&self, consent: &Consent) -> Result<()> {
-        info!("CHECK-CONSENT - (sid = {:?})", consent.sid);
+        info!("CHECK-CONSENT - (id = {:?}, sid = {:?}, auth = {:?}, #profiles = {:?})", consent.id(), consent.sid, consent.authorized.encode(), consent.profiles.len());
         
         let current: Subject = self.db.get_subject(&consent.sid)?.ok_or("Subject not found!")?;
         consent.check(&current)
     }
 
     pub fn check_revoke(&self, revoke: &RevokeConsent) -> Result<()> {
-        info!("CHECK-REVOKE - (sid = {:?})", revoke.sid);
+        info!("CHECK-REVOKE - (id = {:?}, sid = {:?}, consent = {:?})", revoke.id(), revoke.sid, revoke.consent);
         
         let current: Subject = self.db.get_subject(&revoke.sid)?.ok_or("Subject not found!")?;
         revoke.check(&current)
@@ -32,7 +32,7 @@ impl ConsentHandler {
 
     pub fn commit_consent(&mut self, consent: Consent) -> Result<()> {
         //self.check_consent(&consent)?;
-        info!("COMMIT-CONSENT - (sid = {:?})", consent.sid);
+        info!("COMMIT-CONSENT - (id = {:?})", consent.id());
 
         let mut current: Subject = self.db.get_subject(&consent.sid)?.ok_or("Subject not found!")?;
         current.authorize(&consent);
@@ -46,7 +46,7 @@ impl ConsentHandler {
 
     pub fn commit_revoke(&mut self, revoke: RevokeConsent) -> Result<()> {
         //self.check_revoke(&revoke)?;
-        info!("COMMIT-REVOKE - (sid = {:?})", revoke.sid);
+        info!("COMMIT-REVOKE - (id = {:?})", revoke.id());
 
         let consent: Consent = self.db.get_consent(&revoke.consent)?.ok_or("Consent not found!")?;
         let mut current: Subject = self.db.get_subject(&revoke.sid)?.ok_or("Subject not found!")?;
