@@ -59,7 +59,7 @@ impl MasterKeyHandler {
     }
 
     pub fn commit(&mut self, mkey: MasterKey) -> Result<()> {
-        self.check(&mkey)?; // TODO: optimize by using local cache?
+        //self.check(&mkey)?;
         info!("COMMIT-KEY - (session = {:#?})", mkey.session);
         
         let n = self.config.peers.len();

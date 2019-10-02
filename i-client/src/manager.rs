@@ -9,7 +9,7 @@ use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, HardKeyDecoder, RistrettoPoint};
+use core_fpi::{G, ID, uuid, rnd_scalar, Scalar, KeyEncoder, HardKeyDecoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::consents::*;
 use core_fpi::messages::*;
@@ -61,17 +61,24 @@ enum SType { Updating, Merged, Stored }
 struct Storage {}
 
 impl Storage {
-    fn load(home: &str, sid: &str) -> (Option<MySubject>, Option<MySubject>, Option<MySubject>) {
+    fn load(home: &str, sid: &str) -> (Option<Update>, Option<MySubject>, Option<MySubject>) {
         let upd_data = read(&select(home, sid, SType::Updating));
         let mrg_data = read(&select(home, sid, SType::Merged));
         let sto_data = read(&select(home, sid, SType::Stored));
 
         // read what you can and ignore the rest
-        let upd: Option<MySubject> = match upd_data { None => None, Some(data) => deserialize(&data).ok() };
+        let upd: Option<Update> = match upd_data { None => None, Some(data) => deserialize(&data).ok() };
         let mrg: Option<MySubject> = match mrg_data { None => None, Some(data) => deserialize(&data).ok() };
         let sto: Option<MySubject> = match sto_data { None => None, Some(data) => deserialize(&data).ok() };
         
         (upd, mrg, sto)
+    }
+
+    fn update(home: &str, sid: &str, update: &Update) -> Result<()>{
+        let data = serialize(&update).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode subject!"))?;
+        let file = select(home, sid, SType::Updating);
+
+        write(&file, data)
     }
 
     fn store(home: &str, sid: &str, typ: SType, my: &MySubject) -> Result<()> {
@@ -105,7 +112,7 @@ pub struct SubjectManager<F, Q> where F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(
     pub sid: String,
     pub config: Config,
 
-    pub upd: Option<MySubject>,
+    pub upd: Option<Update>,
     pub mrg: Option<MySubject>,
     pub sto: Option<MySubject>,
 
@@ -136,8 +143,10 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         subject.keys.push(SubjectKey::sign(&self.sid, 0, skey, &secret, &skey));
 
         // sync update
-        let update = MySubject { secret, profile_secrets: HashMap::new(), subject };
-        self.sync_subject(update)
+        let update = Update { sid: self.sid.clone(), msg: Value::VSubject(subject), secret, profile_secrets: HashMap::new() };
+        Storage::update(&self.home, &self.sid, &update)?;
+        self.upd = Some(update);
+        self.submit()
     }
 
     pub fn evolve(&mut self) -> Result<()> {
@@ -152,8 +161,10 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 subject.keys.push(skey);
 
                 // sync update
-                let update = MySubject { secret, profile_secrets: HashMap::new(), subject };
-                self.sync_subject(update)
+                let update = Update { sid: self.sid.clone(), msg: Value::VSubject(subject), secret, profile_secrets: HashMap::new() };
+                Storage::update(&self.home, &self.sid, &update)?;
+                self.upd = Some(update);
+                self.submit()
             }
         }
     }
@@ -177,12 +188,14 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 let mut profile_secrets = HashMap::<String, Scalar>::new();
                 profile_secrets.insert(ProfileLocation::pid(typ, lurl), p_secret);
 
-                let mut sub = Subject::new(&self.sid);
-                sub.push(profile);
+                let mut subject = Subject::new(&self.sid);
+                subject.push(profile);
 
                 // sync update
-                let update = MySubject { secret: my.secret, profile_secrets, subject: sub };
-                self.sync_subject(update)
+                let update = Update { sid: self.sid.clone(), msg: Value::VSubject(subject), secret: my.secret, profile_secrets };
+                Storage::update(&self.home, &self.sid, &update)?;
+                self.upd = Some(update);
+                self.submit()
             }
         }
     }
@@ -199,7 +212,32 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 let consent = Consent::sign(&self.sid, profiles, &authorized, &my.secret, skey);
                 consent.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
-                self.sync_consent(consent)
+                // sync update
+                let update = Update { sid: self.sid.clone(), msg: Value::VConsent(consent), secret: my.secret, profile_secrets: HashMap::new() };
+                Storage::update(&self.home, &self.sid, &update)?;
+                self.upd = Some(update);
+                self.submit()
+            }
+        }
+    }
+
+    pub fn revoke(&mut self, consent_id: &str) -> Result<()> {
+        self.check_pending()?;
+        
+        match &self.sto {
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            Some(my) => {
+                my.consents.get(consent_id).ok_or_else(|| Error::new(ErrorKind::Other, "No consent found!"))?;
+
+                let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+                let revoke = RevokeConsent::sign(&self.sid, consent_id, &my.secret, skey);
+
+                // sync update
+                let update = Update { sid: self.sid.clone(), msg: Value::VRevokeConsent(revoke), secret: my.secret, profile_secrets: HashMap::new() };
+        
+                Storage::update(&self.home, &self.sid, &update)?;
+                self.upd = Some(update);
+                self.submit()
             }
         }
     }
@@ -260,16 +298,9 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         Ok(())
     }
 
-    //TODO: improve performance. Try to remove the many clone() calls!
-    fn sync_subject(&mut self, update: MySubject) -> Result<()> {
-        let secret = update.secret;
-        let profile_secrets = update.profile_secrets.clone();
-        
-        let subject = update.subject.clone();
-        let sid = subject.sid.clone();
-
-        Storage::store(&self.home, &self.sid, SType::Updating, &update)?;
-        self.upd = Some(update);
+    // submit an existing update
+    fn submit(&mut self) -> Result<()> {
+        let update = self.upd.as_ref().ok_or_else(|| Error::new(ErrorKind::Other, "No update found to commit!"))?;
 
         // select a random peer
         use rand::seq::SliceRandom;
@@ -277,52 +308,89 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
         // process sync message
         match selection {
-            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
-            Some(sel) => (self.commit)(&sel, Commit::Value(Value::VSubject(subject.clone())))?
+            None => return Err(Error::new(ErrorKind::Other, "No peer found to request commit!")),
+            Some(sel) => (self.commit)(&sel, Commit::Value(update.msg.clone()))?
         }
 
-        // merge with existent
-        let merged = match self.sto.take() {
-            None => self.upd.take().unwrap(),
-            Some(mut stored) => {
-                stored.secret = secret;
-                stored.profile_secrets.extend(profile_secrets);
+        self.merge()
+    }
 
-                stored.subject.merge(subject);
-                Storage::store(&self.home, &self.sid, SType::Merged, &stored)?;
-                stored
+    // merge a submitted update
+    fn merge(&mut self) -> Result<()> {
+        let update = self.upd.take().ok_or_else(|| Error::new(ErrorKind::Other, "No update found to merge!"))?;
+
+        let merged = match self.sto.take() {
+            None => {
+                if let Value::VSubject(value) = update.msg {
+                    MySubject {
+                       secret: update.secret,
+                       profile_secrets: update.profile_secrets,
+                       subject: value,
+                       consents: HashMap::new()
+                    }
+                } else {
+                    return Err(Error::new(ErrorKind::Other, "There is not subject in the store!"))
+                }
+            },
+
+            Some(mut my) => {
+                match update.msg {
+                    Value::VConsent(value) => {
+                        my.subject.authorize(&value);
+                        my.consents.insert(value.id().into(), value);
+                    },
+
+                    Value::VRevokeConsent(value) => {
+                        let consent = my.consents.get(&value.consent).ok_or_else(|| Error::new(ErrorKind::Other, "No consent found!"))?;
+                        my.subject.revoke(&consent);
+                        my.consents.remove(&value.consent);
+                    },
+
+                    Value::VSubject(value) => {
+                        my.secret = update.secret;
+                        my.profile_secrets.extend(update.profile_secrets);
+                        my.subject.merge(value);
+                    },
+
+                    _ => unreachable!()
+                }
+
+                my
             }
         };
 
-        // store final result
-        Storage::store(&self.home, &self.sid, SType::Stored, &merged)?;
-        self.sto = Some(merged);
-        Storage::clean(&self.home, &sid);
+        // write-ahead log
+        Storage::store(&self.home, &update.sid, SType::Merged, &merged)?;
+        self.mrg = Some(merged);
+        self.upd = None;
 
-        Ok(())
+        // store final result
+        self.store(&update.sid)
     }
 
-    fn sync_consent(&mut self, consent: Consent) -> Result<()> {
-        // select a random peer
-        use rand::seq::SliceRandom;
-        let selection = self.config.peers.choose(&mut rand::thread_rng());
+    // persistent a submitted and correctly merge update
+    fn store(&mut self, sid: &str) -> Result<()> {
+        if let Some(merged) = self.mrg.as_ref() {
+            Storage::store(&self.home, &sid, SType::Stored, merged)?;
+            self.sto = self.mrg.take();
 
-        // process sync message
-        match selection {
-            None => return Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
-            Some(sel) => (self.commit)(&sel, Commit::Value(Value::VConsent(consent.clone())))?
+            Storage::clean(&self.home, &sid);
         }
 
-        // store final result
-        let mut merged = self.sto.take().unwrap();
-        merged.subject.authorize(&consent);
-
-        Storage::store(&self.home, &self.sid, SType::Stored, &merged)?;
-        self.sto = Some(merged);
-        Storage::clean(&self.home, &self.sid);
-
         Ok(())
     }
+}
+
+//-----------------------------------------------------------------------------------------------------------
+// Update
+//-----------------------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Update {
+    sid: String,
+    msg: Value,
+
+    secret: Scalar,
+    profile_secrets: HashMap<String, Scalar>
 }
 
 //-----------------------------------------------------------------------------------------------------------
@@ -333,7 +401,8 @@ pub struct MySubject {
     secret: Scalar,                                 // current subject-key secret
     profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
 
-    subject: Subject
+    subject: Subject,
+    consents: HashMap<String, Consent>
 }
 
 impl Drop for MySubject {
@@ -352,6 +421,7 @@ impl Debug for MySubject {
             .field("secret", &self.secret.encode())
             .field("profile_secrets", &p_secrets)
             .field("subject", &self.subject)
+            .field("consents", &self.consents)
             .finish()
     }
 }

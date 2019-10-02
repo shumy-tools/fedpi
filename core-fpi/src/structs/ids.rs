@@ -16,8 +16,7 @@ pub struct Subject {
     pub keys: Vec<SubjectKey>,                                  // All subject keys
 
     pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
-    pub consents: HashMap<String, HashSet<String>>,             // All profile consents per client <authorized-key: <profile>>
-    // revoked consents should not be part of the consent list, although those are still recorded in the DB
+    pub authorizations: HashMap<String, HashSet<String>>,       // All profile authorizations per client <authorized-key: <profile>>
 
     #[serde(skip)] _phantom: () // force use of constructor
 }
@@ -34,7 +33,7 @@ impl Debug for Subject {
             .field("sid", &self.sid)
             .field("keys", &self.keys)
             .field("profiles", &self.profiles.values())
-            .field("consents", &self.consents)
+            .field("authorizations", &self.authorizations)
             .finish()
     }
 }
@@ -82,23 +81,27 @@ impl Subject {
             panic!("self.sid != consent.sid");
         }
 
-        let ckey = consent.authorized.encode();
-        let consents = self.consents.entry(ckey).or_insert_with(|| HashSet::<String>::new());
+        let akey = consent.authorized.encode();
+        let consents = self.authorizations.entry(akey).or_insert_with(|| HashSet::<String>::new());
         for item in consent.profiles.iter() {
             consents.insert(item.clone());
         }
     }
 
-    pub fn revoke(&mut self, revoke: &Consent) {
-        if self.sid != revoke.sid {
+    pub fn revoke(&mut self, consent: &Consent) {
+        if self.sid != consent.sid {
             // if it executes it's a bug in the code
             panic!("self.sid != revoke.sid");
         }
 
-        let ckey = revoke.authorized.encode();
-        if let Some(ref mut consents) = self.consents.get_mut(&ckey) {
-            for item in revoke.profiles.iter() {
+        let akey = consent.authorized.encode();
+        if let Some(ref mut consents) = self.authorizations.get_mut(&akey) {
+            for item in consent.profiles.iter() {
                 consents.remove(item);
+            }
+
+            if consents.is_empty() {
+                self.authorizations.remove(&akey);
             }
         }
     }

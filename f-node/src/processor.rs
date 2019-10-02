@@ -14,7 +14,7 @@ use crate::databases::GlobalDB;
 pub struct Processor {
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
-    consents_handler: ConsentHandler
+    consent_handler: ConsentHandler
 }
 
 impl Processor {
@@ -27,7 +27,7 @@ impl Processor {
         Self {
             mkey_handler: MasterKeyHandler::new(cfg.clone()),
             subject_handler: SubjectHandler::new(db.clone()),
-            consents_handler: ConsentHandler::new(db.clone())
+            consent_handler: ConsentHandler::new(db.clone())
         }
     }
 
@@ -66,8 +66,14 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("CHECK - Value::VConsent");
-                    self.consents_handler.check(&consent).map_err(|e|{
+                    self.consent_handler.check_consent(&consent).map_err(|e|{
                         error!("CHECK-ERR - Value::VConsent - {:?}", e);
+                    e})
+                },
+                Value::VRevokeConsent(revoke) => {
+                    info!("CHECK - Value::VRevokeConsent");
+                    self.consent_handler.check_revoke(&revoke).map_err(|e|{
+                        error!("CHECK-ERR - Value::VRevokeConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())
@@ -96,8 +102,14 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("COMMIT - Value::VConsent");
-                    self.consents_handler.commit(consent).map_err(|e|{
+                    self.consent_handler.commit_consent(consent).map_err(|e|{
                         error!("COMMIT-ERR - Value::VConsent - {:?}", e);
+                    e})
+                },
+                Value::VRevokeConsent(revoke) => {
+                    info!("COMMIT - Value::VRevokeConsent");
+                    self.consent_handler.commit_revoke(revoke).map_err(|e|{
+                        error!("COMMIT-ERR - Value::VRevokeConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())

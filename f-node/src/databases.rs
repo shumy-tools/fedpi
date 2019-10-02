@@ -2,11 +2,12 @@ use sled::{Db, IVec, TransactionError, TransactionalTree};
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
 use log::error;
 
 use core_fpi::{ID, Result};
 use core_fpi::ids::*;
+use core_fpi::consents::*;
 use core_fpi::messages::{encode, decode};
 
 //--------------------------------------------------------------------
@@ -43,7 +44,7 @@ impl GlobalDB {
 
 
     pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
-        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get id: {}", e))?;
+        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get subject by id: {}", e))?;
         match res {
             None => Ok(None),
             Some(data) => {
@@ -53,8 +54,8 @@ impl GlobalDB {
         }
     }
 
-    /*pub fn get_consent(&self, id: &str) -> Result<Option<Consent>> {
-        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get id: {}", e))?;
+    pub fn get_consent(&self, id: &str) -> Result<Option<Consent>> {
+        let res: Option<IVec> = self.db.get(id).map_err(|e| format!("Unable to get consent by id: {}", e))?;
         match res {
             None => Ok(None),
             Some(data) => {
@@ -62,7 +63,7 @@ impl GlobalDB {
                 Ok(Some(obj))
             }
         }
-    }*/
+    }
 
     pub fn tx<T: FnOnce(DbTx) -> Result<()>>(&self, commit: T) -> Result<()> {
         // BIG fucking hack so I can call the closure!!!

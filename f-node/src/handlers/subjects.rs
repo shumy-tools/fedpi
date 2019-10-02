@@ -23,7 +23,7 @@ impl SubjectHandler {
     }
 
     pub fn commit(&mut self, subject: Subject) -> Result<()> {
-        self.check(&subject)?; // TODO: optimize by using local cache?
+        //self.check(&subject)?;
         info!("COMMIT-SUBJECT - (sid = {:?})", subject.sid);
         
         let current: Option<Subject> = self.db.get_subject(subject.id())?;

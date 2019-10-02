@@ -59,6 +59,12 @@ fn main() {
                 .min_values(1)
                 .takes_value(true)
                 .required(true)))
+        .subcommand(SubCommand::with_name("revoke")
+            .about("Revoke a previous registered consent")
+            .arg(Arg::with_name("consent")
+                .help("Selects the consent")
+                .takes_value(true)
+                .required(true)))
         .get_matches();
     
     let home = matches.value_of("home").unwrap_or(".");
@@ -147,13 +153,20 @@ fn main() {
         if let Err(e) = sm.profile(&typ, &lurl) {
             println!("ERROR -> {}", e);
         }
-    }  else if matches.is_present("consent") {
+    } else if matches.is_present("consent") {
         let matches = matches.subcommand_matches("consent").unwrap();
         let auth = matches.value_of("auth").unwrap().to_owned();
         let profiles: Vec<&str> = matches.values_of("profiles").unwrap().collect();
         let profiles: Vec<String> = profiles.iter().map(|v| v.to_string()).collect();
 
         if let Err(e) = sm.consent(&auth, &profiles) {
+            println!("ERROR -> {}", e);
+        }
+    } else if matches.is_present("revoke") {
+        let matches = matches.subcommand_matches("revoke").unwrap();
+        let consent = matches.value_of("consent").unwrap().to_owned();
+
+        if let Err(e) = sm.revoke(&consent) {
             println!("ERROR -> {}", e);
         }
     }
