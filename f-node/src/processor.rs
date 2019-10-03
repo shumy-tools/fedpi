@@ -7,27 +7,30 @@ use core_fpi::messages::*;
 use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
 use crate::handlers::consents::*;
+use crate::handlers::queries::*;
 use crate::config::Config;
-use crate::databases::GlobalDB;
+use crate::databases::AppDB;
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
-    consent_handler: ConsentHandler
+    consent_handler: ConsentHandler,
+    query_handler: QueryHandler
 }
 
 impl Processor {
     pub fn new(cfg: Config) -> Self {
         let cfg = Arc::new(cfg);
 
-        let db_file = format!("{}/data/app.db", cfg.home);
-        let db = Arc::new(GlobalDB::new(&db_file));
+        let data_path = format!("{}/data", cfg.home);
+        let db = Arc::new(AppDB::new(&data_path));
         
         Self {
-            mkey_handler: MasterKeyHandler::new(cfg.clone()),
+            mkey_handler: MasterKeyHandler::new(cfg.clone(), db.clone()),
             subject_handler: SubjectHandler::new(db.clone()),
-            consent_handler: ConsentHandler::new(db.clone())
+            consent_handler: ConsentHandler::new(db.clone()),
+            query_handler: QueryHandler::new(cfg.clone(), db.clone()),
         }
     }
 
@@ -39,6 +42,14 @@ impl Processor {
                     info!("REQUEST - Negotiate::NMasterKeyRequest");
                     self.mkey_handler.request(req).map_err(|e|{
                         error!("REQUEST-ERR - Negotiate::NMasterKeyRequest - {:?}", e);
+                    e})
+                }
+            },
+            Request::Query(query) => match query {
+                Query::QDiscloseRequest(req) => {
+                    info!("REQUEST - Query::QDiscloseRequest");
+                    self.query_handler.request(req).map_err(|e|{
+                        error!("REQUEST-ERR - Query::QDiscloseRequest - {:?}", e);
                     e})
                 }
             }

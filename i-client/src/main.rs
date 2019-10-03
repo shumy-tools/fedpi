@@ -36,8 +36,12 @@ fn main() {
             .about("Request the creation of a subject"))
         .subcommand(SubCommand::with_name("evolve")
             .about("Request the evolution of the subject-key"))
-        .subcommand(SubCommand::with_name("negotiate-key")
-            .about("Fires the negotiation protocol to create a master key"))
+        .subcommand(SubCommand::with_name("negotiate")
+            .about("Fires the negotiation protocol to create or update a master key")
+            .arg(Arg::with_name("kid")
+                .help("Select the key-id")
+                .takes_value(true)
+                .required(true)))
         .subcommand(SubCommand::with_name("profile")
             .about("Request the creation or evolution of a subject profile")
             .arg(Arg::with_name("type")
@@ -63,6 +67,17 @@ fn main() {
             .about("Revoke a previous registered consent")
             .arg(Arg::with_name("consent")
                 .help("Select the consent")
+                .takes_value(true)
+                .required(true)))
+        .subcommand(SubCommand::with_name("disclose")
+            .about("Request profile disclosures for subject (requires consent)")
+            .arg(Arg::with_name("target")
+                .help("Select the sibject-id")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("profiles")
+                .help("Selects a set of profile types")
+                .min_values(1)
                 .takes_value(true)
                 .required(true)))
         .get_matches();
@@ -141,8 +156,11 @@ fn main() {
         }
     } else if matches.is_present("evolve") {
         sm.evolve().unwrap();
-    } else if matches.is_present("negotiate-key") {
-        if let Err(e) = sm.negotiate() {
+    } else if matches.is_present("negotiate") {
+        let matches = matches.subcommand_matches("negotiate").unwrap();
+        let kid = matches.value_of("kid").unwrap().to_owned();
+
+        if let Err(e) = sm.negotiate(&kid) {
             println!("ERROR -> {}", e);
         }
     } else if matches.is_present("profile") {
@@ -167,6 +185,15 @@ fn main() {
         let consent = matches.value_of("consent").unwrap().to_owned();
 
         if let Err(e) = sm.revoke(&consent) {
+            println!("ERROR -> {}", e);
+        }
+    } else if matches.is_present("disclose") {
+        let matches = matches.subcommand_matches("disclose").unwrap();
+        let target = matches.value_of("target").unwrap().to_owned();
+        let profiles: Vec<&str> = matches.values_of("profiles").unwrap().collect();
+        let profiles: Vec<String> = profiles.iter().map(|v| v.to_string()).collect();
+
+        if let Err(e) = sm.disclose(&target, &profiles) {
             println!("ERROR -> {}", e);
         }
     }

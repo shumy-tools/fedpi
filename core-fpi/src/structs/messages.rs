@@ -1,5 +1,6 @@
 use crate::Result;
 use crate::structs::consents::*;
+use crate::structs::disclosures::*;
 use crate::structs::ids::*;
 use crate::structs::records::*;
 use crate::structs::keys::*;
@@ -33,7 +34,7 @@ pub fn encode<T: Serialize>(msg: &T) -> Result<Vec<u8>> {
 |     Request     |   Response   |   Commit   |
 -----------------------------------------------
 |    Negotiate    |     Vote     |   Evidence |
-|      Query      |    Result    |      X     |
+|      Query      |    QResult   |      X     |
 |        X        |       X      |    Value   |
 |        X        |    Notify    |      X     |
 |  Publish/Send   |       X      |      X     |
@@ -45,7 +46,8 @@ pub fn encode<T: Serialize>(msg: &T) -> Result<Vec<u8>> {
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Request {
-    Negotiate(Negotiate)
+    Negotiate(Negotiate),
+    Query(Query)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -53,17 +55,28 @@ pub enum Negotiate {
     NMasterKeyRequest(MasterKeyRequest)
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Query {
+    QDiscloseRequest(DiscloseRequest)
+}
+
 //--------------------------------------------------------------------
 // Response
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Response {
-    Vote(Vote)
+    Vote(Vote),
+    QResult(QResult)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Vote {
     VMasterKeyVote(MasterKeyVote)
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum QResult {
+    QDiscloseResult(DiscloseResult)
 }
 
 //--------------------------------------------------------------------

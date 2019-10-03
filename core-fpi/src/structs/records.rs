@@ -15,8 +15,8 @@ pub struct Record {
 }
 
 impl ID for Record {
-    fn id(&self) -> &str {
-        &self.sig.encoded
+    fn id(&self) -> String {
+        self.sig.encoded.clone()
     }
 }
 
@@ -119,7 +119,7 @@ mod tests {
         let pseudonym1 = secret1 * base;
 
         let r_data2 = "next data2".as_bytes().to_vec();
-        let record2 = Record::sign(record.id(), r_data2, &base, &secret1, &pseudonym1);
+        let record2 = Record::sign(&record.id(), r_data2, &base, &secret1, &pseudonym1);
         assert!(record2.check(Some(&record), &base, &pseudonym) == Err("Last record doesn't match the key for the signature!".into()));
     }
 }

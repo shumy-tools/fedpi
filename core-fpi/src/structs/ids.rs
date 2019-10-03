@@ -22,8 +22,8 @@ pub struct Subject {
 }
 
 impl ID for Subject {
-    fn id(&self) -> &str {
-        &self.sid
+    fn id(&self) -> String {
+        self.sid.clone()
     }
 }
 
@@ -81,8 +81,8 @@ impl Subject {
             panic!("self.sid != consent.sid");
         }
 
-        let akey = consent.authorized.encode();
-        let consents = self.authorizations.entry(akey).or_insert_with(|| HashSet::<String>::new());
+        let aid = consent.authorized.clone();
+        let consents = self.authorizations.entry(aid).or_insert_with(|| HashSet::<String>::new());
         for item in consent.profiles.iter() {
             consents.insert(item.clone());
         }
@@ -94,14 +94,14 @@ impl Subject {
             panic!("self.sid != revoke.sid");
         }
 
-        let akey = consent.authorized.encode();
-        if let Some(ref mut consents) = self.authorizations.get_mut(&akey) {
+        let aid = consent.authorized.clone();
+        if let Some(ref mut consents) = self.authorizations.get_mut(&aid) {
             for item in consent.profiles.iter() {
                 consents.remove(item);
             }
 
             if consents.is_empty() {
-                self.authorizations.remove(&akey);
+                self.authorizations.remove(&aid);
             }
         }
     }

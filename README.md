@@ -29,3 +29,4 @@ Is where the anonymous or encrypted data resides, providing public of private ac
 ## Semi-Completed Protocols
 - [x] Subject creation and syncronization protocol
 - [x] Master key negotiation protocol
+- [x] Consent and revoke profile authorizations

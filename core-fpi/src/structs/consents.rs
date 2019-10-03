@@ -1,17 +1,16 @@
-use std::fmt::{Debug, Formatter};
 use serde::{Serialize, Deserialize};
 
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
-use crate::{Result, ID, KeyEncoder, Scalar, RistrettoPoint};
+use crate::{Result, ID, Scalar};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject Consent
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Consent {
-    pub sid: String,                                // Subject identification
-    pub authorized: RistrettoPoint,                 // Authorized client-key
+    pub sid: String,                                // Subject-id submitting consent
+    pub authorized: String,                         // Authorized data-subject
     pub profiles: Vec<String>,                      // List of consented profiles (full disclosure)
 
     pub sig: IndSignature,                          // Signature from data-subject
@@ -19,28 +18,17 @@ pub struct Consent {
 }
 
 impl ID for Consent {
-    fn id(&self) -> &str {
-        &self.sig.sig.encoded
-    }
-}
-
-impl Debug for Consent {
-    fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
-        fmt.debug_struct("Consent")
-            .field("sid", &self.sid)
-            .field("authorized", &self.authorized.encode())
-            .field("profiles", &self.profiles)
-            .field("sig", &self.sig)
-            .finish()
+    fn id(&self) -> String {
+        self.sig.sig.encoded.clone()
     }
 }
 
 impl Consent {
-    pub fn sign(sid: &str, profiles: &[String], authorized: &RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+    pub fn sign(sid: &str, authorized: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let sig_data = Self::data(sid, authorized, profiles);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
-        Self { sid: sid.into(), authorized: *authorized, profiles: profiles.to_vec(), sig, _phantom: () }
+        Self { sid: sid.into(), authorized: authorized.into(), profiles: profiles.to_vec(), sig, _phantom: () }
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
@@ -60,8 +48,7 @@ impl Consent {
         Ok(())
     }
 
-
-    fn data(sid: &str, authorized: &RistrettoPoint, profiles: &[String]) -> [Vec<u8>; 3] {
+    fn data(sid: &str, authorized: &str, profiles: &[String]) -> [Vec<u8>; 3] {
         // These unwrap() should never fail, or it's a serious code bug!
         let b_sid = bincode::serialize(sid).unwrap();
         let b_authorized = bincode::serialize(authorized).unwrap();
@@ -84,8 +71,8 @@ pub struct RevokeConsent {
 }
 
 impl ID for RevokeConsent {
-    fn id(&self) -> &str {
-        &self.sig.sig.encoded
+    fn id(&self) -> String {
+        self.sig.sig.encoded.clone()
     }
 }
 

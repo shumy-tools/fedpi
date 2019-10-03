@@ -3,15 +3,18 @@ use std::fmt::{Debug, Formatter};
 
 use std::fs::{File, OpenOptions, remove_file};
 use std::io::{Result, Error, ErrorKind};
+
+use rand::prelude::*;
 use std::io::prelude::*;
 
 use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, ID, uuid, rnd_scalar, Scalar, KeyEncoder, HardKeyDecoder, RistrettoPoint};
+use core_fpi::{G, ID, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::consents::*;
+use core_fpi::disclosures::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
 
@@ -200,16 +203,15 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         }
     }
 
-    pub fn consent(&mut self, auth: &str, profiles: &[String]) -> Result<()> {
+    pub fn consent(&mut self, authorized: &str, profiles: &[String]) -> Result<()> {
         self.check_pending()?;
         
         match &self.sto {
             None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
-                let authorized: RistrettoPoint = auth.to_string().decode();
 
-                let consent = Consent::sign(&self.sid, profiles, &authorized, &my.secret, skey);
+                let consent = Consent::sign(&self.sid, authorized, profiles, &my.secret, skey);
                 consent.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 // sync update
@@ -242,10 +244,59 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         }
     }
 
-    pub fn negotiate(&mut self) -> Result<()> {
+    pub fn disclose(&mut self, target: &str, profiles: &[String]) -> Result<()> {
+        self.check_pending()?;
+        
+        match &self.sto {
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            Some(my) => {
+                let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+                
+                let disclose = DiscloseRequest::sign(&self.sid, target, profiles, &my.secret, skey);
+                disclose.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
+
+                let min = 2*self.config.threshold + 1;
+
+                // select a random set of 2t + 1 peers
+                let mut rng = rand::thread_rng();
+                let mut peers = self.config.peers.clone();
+                peers.shuffle(&mut rng);
+
+                if peers.len() < min {
+                    return Err(Error::new(ErrorKind::Other, "Not enought peers to process disclosure!"))
+                }
+
+                let mut results = HashMap::<usize, DiscloseResult>::with_capacity(2*self.config.threshold + 1);
+                let selected = &peers[..min];
+                for sel in selected.iter() {
+                    let res = (self.query)(&sel, Request::Query(Query::QDiscloseRequest(disclose.clone())))?;
+                    match res {
+                        Response::QResult(res) => match res {
+                            QResult::QDiscloseResult(disclose) => {
+                                results.insert(disclose.sig.index, disclose);
+                            }
+                        },
+                        _ => return Err(Error::new(ErrorKind::Other, "Unexpected response on disclosure!"))
+                    }
+                    
+                }
+
+                if results.len() < min {
+                    // TODO: try other peers?
+                    return Err(Error::new(ErrorKind::Other, "Not enought responses to process disclosure!"))
+                }
+                
+                // TODO: check and combine results to get pseudonyms
+
+                Ok(())
+            }
+        }
+    }
+
+    pub fn negotiate(&mut self, kid: &str) -> Result<()> {
         let session = uuid();
         let n = self.config.peers.len();
-        let req = MasterKeyRequest::sign(&session, &self.config.secret, self.config.pkey);
+        let req = MasterKeyRequest::sign(&session, kid, &self.config.secret, self.config.pkey);
 
         // set the results in ordered fashion
         let mut votes = Vec::<MasterKeyVote>::with_capacity(n);
@@ -266,17 +317,17 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
                         votes.insert(vote.sig.index, vote);
                     }
-                }
+                },
+                _ => return Err(Error::new(ErrorKind::Other, "Unexpected response on key negotiation!"))
             }
         }
 
         // If all is OK, create MasterKey to commit
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let mk = MasterKey::sign(&session, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
+        let mk = MasterKey::sign(&session, kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
         // select a random peer
-        use rand::seq::SliceRandom;
         let selection = self.config.peers.choose(&mut rand::thread_rng());
 
         // process master-key commit
@@ -303,7 +354,6 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         let update = self.upd.as_ref().ok_or_else(|| Error::new(ErrorKind::Other, "No update found to commit!"))?;
 
         // select a random peer
-        use rand::seq::SliceRandom;
         let selection = self.config.peers.choose(&mut rand::thread_rng());
 
         // process sync message
