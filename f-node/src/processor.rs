@@ -6,7 +6,7 @@ use core_fpi::messages::*;
 
 use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
-use crate::handlers::consents::*;
+use crate::handlers::authorizations::*;
 use crate::handlers::queries::*;
 use crate::config::Config;
 use crate::databases::AppDB;
@@ -15,7 +15,7 @@ use crate::databases::AppDB;
 pub struct Processor {
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
-    consent_handler: ConsentHandler,
+    auth_handler: AuthorizationHandler,
     query_handler: QueryHandler
 }
 
@@ -29,7 +29,7 @@ impl Processor {
         Self {
             mkey_handler: MasterKeyHandler::new(cfg.clone(), db.clone()),
             subject_handler: SubjectHandler::new(db.clone()),
-            consent_handler: ConsentHandler::new(db.clone()),
+            auth_handler: AuthorizationHandler::new(db.clone()),
             query_handler: QueryHandler::new(cfg.clone(), db.clone()),
         }
     }
@@ -77,7 +77,7 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("CHECK - Value::VConsent");
-                    self.consent_handler.check(&consent).map_err(|e|{
+                    self.auth_handler.check(&consent).map_err(|e|{
                         error!("CHECK-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
@@ -107,7 +107,7 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("COMMIT - Value::VConsent");
-                    self.consent_handler.commit(consent).map_err(|e|{
+                    self.auth_handler.commit(consent).map_err(|e|{
                         error!("COMMIT-ERR - Value::VConsent - {:?}", e);
                     e})
                 },

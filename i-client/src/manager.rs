@@ -13,7 +13,7 @@ use clear_on_drop::clear::Clear;
 
 use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
-use core_fpi::consents::*;
+use core_fpi::authorizations::*;
 use core_fpi::disclosures::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
@@ -411,10 +411,12 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         let merged = match self.sto.take() {
             None => {
                 if let Value::VSubject(value) = update.msg {
+                    let sid = value.sid.clone();
                     MySubject {
                        secret: update.secret,
                        profile_secrets: update.profile_secrets,
-                       subject: value
+                       subject: value,
+                       auths: Authorizations::new(&sid)
                     }
                 } else {
                     return Err(Error::new(ErrorKind::Other, "There is not subject in the store!"))
@@ -425,8 +427,8 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 match update.msg {
                     Value::VConsent(value) => {
                         match value.typ {
-                            ConsentType::Consent => my.subject.authorize(&value),
-                            ConsentType::Revoke => my.subject.revoke(&value)
+                            ConsentType::Consent => my.auths.authorize(&value),
+                            ConsentType::Revoke => my.auths.revoke(&value)
                         }
                     },
 
@@ -484,7 +486,9 @@ pub struct Update {
 pub struct MySubject {
     secret: Scalar,                                 // current subject-key secret
     profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
-    subject: Subject
+    
+    subject: Subject,
+    auths: Authorizations
 }
 
 impl Drop for MySubject {

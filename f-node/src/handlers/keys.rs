@@ -22,6 +22,8 @@ impl MasterKeyHandler {
     }
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
+        info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.session, req.kid);
+
         // verify if the client has authorization to fire negotiation
         if req.sig.key != self.cfg.admin || !req.verify() {
             return Err("Client has not authorization to negotiate master-key!".into())

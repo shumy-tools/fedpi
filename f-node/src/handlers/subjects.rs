@@ -16,7 +16,7 @@ impl SubjectHandler {
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
-        info!("CHECK-SUBJECT - (id = {:?}, #keys = {:?}, #profiles = {:?}, #auths = {:?})", subject.id(), subject.keys.len(), subject.profiles.len(), subject.authorizations.len());
+        info!("CHECK-SUBJECT - (id = {:?}, #keys = {:?}, #profiles = {:?})", subject.id(), subject.keys.len(), subject.profiles.len());
         let current: Option<Subject> = self.db.get_subject(&subject.id())?;
         info!("CURRENT - {:#?}", current);
         

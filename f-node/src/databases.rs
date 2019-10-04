@@ -10,8 +10,8 @@ use log::error;
 
 use core_fpi::{ID, Result};
 use core_fpi::ids::*;
-use core_fpi::consents::*;
 use core_fpi::keys::*;
+use core_fpi::authorizations::*;
 use core_fpi::messages::{encode, decode};
 
 pub const MASTER: &str = "master";
@@ -38,8 +38,8 @@ impl AppDB {
         }
     }
 
-    pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
-        let res: Option<IVec> = self.global.get(id).map_err(|e| format!("Unable to get subject by id: {}", e))?;
+    pub fn get_subject(&self, sid: &str) -> Result<Option<Subject>> {
+        let res: Option<IVec> = self.global.get(sid).map_err(|e| format!("Unable to get subject by sid: {}", e))?;
         match res {
             None => Ok(None),
             Some(data) => {
@@ -49,16 +49,17 @@ impl AppDB {
         }
     }
 
-    /*pub fn get_consent(&self, id: &str) -> Result<Option<Consent>> {
-        let res: Option<IVec> = self.global.get(id).map_err(|e| format!("Unable to get consent by id: {}", e))?;
+    pub fn get_authorizations(&self, sid: &str) -> Result<Authorizations> {
+        let id = format!("auth-{}", sid);
+        let res: Option<IVec> = self.global.get(id).map_err(|e| format!("Unable to get authorizations for sid: {}", e))?;
         match res {
-            None => Ok(None),
+            None => Ok(Authorizations::new(sid)),
             Some(data) => {
-                let obj: Consent = decode(&data)?;
-                Ok(Some(obj))
+                let obj: Authorizations = decode(&data)?;
+                Ok(obj)
             }
         }
-    }*/
+    }
 
     pub fn get_vote(&self, id: &str) -> Result<Option<MasterKeyVote>> {
         let res: Option<IVec> = self.local.get(id).map_err(|e| format!("Unable to get vote by id: {}", e))?;
@@ -100,24 +101,16 @@ impl AppDB {
         }
     }
 
-    pub fn save_consent(&self, consent: Consent) -> Result<()> {
-        let mut current: Subject = self.get_subject(&consent.sid)?.ok_or("Subject not found!")?;
-        current.authorize(&consent);
+    pub fn save_authorization(&self, consent: Consent) -> Result<()> {
+        let mut auths = self.get_authorizations(&consent.sid)?;
+        match consent.typ {
+            ConsentType::Consent => auths.authorize(&consent),
+            ConsentType::Revoke => auths.revoke(&consent)
+        }
         
         self.global_tx(|tx| {
             tx.set(consent)?;
-            tx.set(current)?;
-            Ok(())
-        })
-    }
-
-    pub fn save_revoke(&self, revoke: Consent) -> Result<()> {
-        let mut current: Subject = self.get_subject(&revoke.sid)?.ok_or("Subject not found!")?;
-        current.revoke(&revoke);
-        
-        self.global_tx(|tx| {
-            tx.set(revoke)?;
-            tx.set(current)?;
+            tx.set(auths)?;
             Ok(())
         })
     }

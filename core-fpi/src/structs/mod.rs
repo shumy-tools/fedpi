@@ -1,4 +1,4 @@
-pub mod consents;
+pub mod authorizations;
 pub mod disclosures;
 pub mod ids;
 pub mod records;

@@ -1,10 +1,9 @@
 use std::fmt::{Debug, Formatter};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::IndSignature;
-use crate::consents::*;
 use crate::{G, rnd_scalar, ID, Result, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
@@ -14,9 +13,7 @@ use crate::{G, rnd_scalar, ID, Result, KeyEncoder, Scalar, RistrettoPoint};
 pub struct Subject {
     pub sid: String,                                            // Subject ID - <Name>
     pub keys: Vec<SubjectKey>,                                  // All subject keys
-
     pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
-    pub authorizations: HashMap<String, HashSet<String>>,       // All profile authorizations per client <authorized-key: <profile>>
 
     #[serde(skip)] _phantom: () // force use of constructor
 }
@@ -33,7 +30,6 @@ impl Debug for Subject {
             .field("sid", &self.sid)
             .field("keys", &self.keys)
             .field("profiles", &self.profiles.values())
-            .field("authorizations", &self.authorizations)
             .finish()
     }
 }
@@ -71,37 +67,6 @@ impl Subject {
             match self.profiles.get_mut(&typ) {
                 None => {self.profiles.insert(typ, item);},
                 Some(ref mut current) => current.merge(item)
-            }
-        }
-    }
-
-    pub fn authorize(&mut self, consent: &Consent) {
-        if self.sid != consent.sid {
-            // if it executes it's a bug in the code
-            panic!("self.sid != consent.sid");
-        }
-
-        let aid = consent.authorized.clone();
-        let consents = self.authorizations.entry(aid).or_insert_with(|| HashSet::<String>::new());
-        for item in consent.profiles.iter() {
-            consents.insert(item.clone());
-        }
-    }
-
-    pub fn revoke(&mut self, consent: &Consent) {
-        if self.sid != consent.sid {
-            // if it executes it's a bug in the code
-            panic!("self.sid != revoke.sid");
-        }
-
-        let aid = consent.authorized.clone();
-        if let Some(ref mut consents) = self.authorizations.get_mut(&aid) {
-            for item in consent.profiles.iter() {
-                consents.remove(item);
-            }
-
-            if consents.is_empty() {
-                self.authorizations.remove(&aid);
             }
         }
     }

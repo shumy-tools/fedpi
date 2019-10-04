@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::structs::consents::*;
+use crate::structs::authorizations::*;
 use crate::structs::disclosures::*;
 use crate::structs::ids::*;
 use crate::structs::records::*;

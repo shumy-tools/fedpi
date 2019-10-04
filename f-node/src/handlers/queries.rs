@@ -19,18 +19,20 @@ impl QueryHandler {
     }
 
     pub fn request(&mut self, disclose: DiscloseRequest) -> Result<Vec<u8>> {
+        info!("REQUEST-DISCLOSE - (sid = {:?}, target = {:?}, #profiles = {:?})", disclose.sid, disclose.target, disclose.profiles.len());
+
         let subject = self.db.get_subject(&disclose.sid)?.ok_or("Subject not found!")?;
         disclose.check(&subject)?;
 
         let mkey = self.db.get_key(MASTER)?.ok_or("Master-key unavailable!")?;
         let target = self.db.get_subject(&disclose.target)?.ok_or("Target not found!")?;
-        let t_auths = target.authorizations.get(&disclose.sid).ok_or("No authorizations found!")?;
+        let auths = self.db.get_authorizations(&disclose.target)?;
 
         // verify if the client has authorization to disclose profiles
         let mut dkeys = DiscloseKeys::new();
         for typ in disclose.profiles.iter() {
-            if !t_auths.contains(typ) {
-                return Err(format!("Client has not authorization for profile: {}", typ))
+            if !auths.is_authorized(&disclose.sid, typ) {
+                return Err(format!("Subject has not authorization for profile: {}", typ))
             }
 
             let prof = target.profiles.get(typ).ok_or("Bug in code. No profile found, but there is an authorization!")?;
