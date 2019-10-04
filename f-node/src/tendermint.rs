@@ -86,15 +86,18 @@ impl abci::Application for NodeApp {
         resp
     }
 
-    // Commit the block with the latest state from the application.
-    /*fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
+    fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
         let mut resp = ResponseCommit::new();
-        // Convert count to bits
-        let mut buf = [0; 8];
-        BigEndian::write_u64(&mut buf, self.count);
-        // Set data so last state is included in the block
-        
-        resp.set_data(buf.to_vec());
+
+        match self.processor.state() {
+            Ok(state) => resp.set_data(state),
+            Err(err) => {
+                //cannot continue, requires manual resolve!
+                error!("Commit-Error: {:?}", err);
+                panic!("Commit error: {:?}", err);
+            }
+        }
+
         resp
-    }*/
+    }
 }

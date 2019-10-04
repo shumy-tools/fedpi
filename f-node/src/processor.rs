@@ -13,6 +13,8 @@ use crate::databases::AppDB;
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
+    db: Arc<AppDB>,
+
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
     auth_handler: AuthorizationHandler,
@@ -27,6 +29,8 @@ impl Processor {
         let db = Arc::new(AppDB::new(&data_path));
         
         Self {
+            db: db.clone(),
+
             mkey_handler: MasterKeyHandler::new(cfg.clone(), db.clone()),
             subject_handler: SubjectHandler::new(db.clone()),
             auth_handler: AuthorizationHandler::new(db.clone()),
@@ -114,5 +118,9 @@ impl Processor {
                 _ => Err("Not implemented!".into())
             }
         }
+    }
+
+    pub fn state(&self) -> Result<Vec<u8>> {
+        self.db.get_state()
     }
 }

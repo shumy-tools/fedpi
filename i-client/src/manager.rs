@@ -411,12 +411,11 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         let merged = match self.sto.take() {
             None => {
                 if let Value::VSubject(value) = update.msg {
-                    let sid = value.sid.clone();
                     MySubject {
                        secret: update.secret,
                        profile_secrets: update.profile_secrets,
                        subject: value,
-                       auths: Authorizations::new(&sid)
+                       auths: Authorizations::new()
                     }
                 } else {
                     return Err(Error::new(ErrorKind::Other, "There is not subject in the store!"))

@@ -73,10 +73,6 @@ impl Debug for MasterKeyVote {
 }
 
 impl MasterKeyVote {
-    pub fn id(session: &str, kid: &str) -> String {
-        format!("mkv-{}-{}", kid, session)
-    }
-
     pub fn sign(session: &str, kid: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
         let data = Self::data(session, kid, peers, &shares, &pkeys, &commit);
         Self {
@@ -161,10 +157,6 @@ pub struct MasterKey {
 }
 
 impl MasterKey {
-    pub fn id(session: &str, kid: &str) -> String {
-        format!("mke-{}-{}", kid, session)
-    }
-
     pub fn sign(session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Result<Self> {
         // expecting responses from all peers
         if votes.len() != n {
@@ -341,10 +333,4 @@ pub struct MasterKeyPair {
     pub kid: String,
     pub share: Share,
     pub public: RistrettoPoint
-}
-
-impl MasterKeyPair {
-    pub fn id(kid: &str) -> String {
-        format!("mkp-{}", kid)
-    }
 }

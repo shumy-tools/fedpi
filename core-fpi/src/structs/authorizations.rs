@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
-use log::error;
 
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
@@ -11,26 +10,15 @@ use crate::{Result, Scalar};
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Authorizations {
-    pub sid: String,
     auths: HashMap<String, HashSet<String>>       // All profile authorizations per subject <subject: <profile>>
 }
 
 impl Authorizations {
-    pub fn id(sid: &str) -> String {
-        format!("auth-{}", sid)
-    }
-
-    pub fn new(sid: &str) -> Self {
-        Self { sid: sid.into(), auths: HashMap::new() }
+    pub fn new() -> Self {
+        Self { auths: HashMap::new() }
     }
 
     pub fn authorize(&mut self, consent: &Consent) {
-        if self.sid != consent.sid {
-            // if it executes it's a bug in the code
-            error!("Bug detected when executing Authorizations::authorize");
-            panic!("self.sid != consent.sid");
-        }
-
         let aid = consent.target.clone();
         let consents = self.auths.entry(aid).or_insert_with(|| HashSet::<String>::new());
         for item in consent.profiles.iter() {
@@ -39,12 +27,6 @@ impl Authorizations {
     }
 
     pub fn revoke(&mut self, consent: &Consent) {
-        if self.sid != consent.sid {
-            // if it executes it's a bug in the code
-            error!("Bug detected when executing Authorizations::revoke");
-            panic!("self.sid != revoke.sid");
-        }
-
         let aid = consent.target.clone();
         if let Some(ref mut consents) = self.auths.get_mut(&aid) {
             for item in consent.profiles.iter() {
@@ -85,10 +67,6 @@ pub struct Consent {
 }
 
 impl Consent {
-    pub fn id(sid: &str, target: &str) -> String {
-        format!("cons-{}-{}", sid, target)
-    }
-
     pub fn sign(sid: &str, typ: ConsentType, target: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let sig_data = Self::data(sid, &typ, target, profiles);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);

@@ -17,8 +17,21 @@ use core_fpi::keys::*;
 use core_fpi::authorizations::*;
 use core_fpi::messages::{encode, decode};
 
+//--------------------------------------------------------------------
+// Reserved keys
+//--------------------------------------------------------------------
 pub const STATE: &str = "state";
 pub const MASTER: &str = "master";
+
+//--------------------------------------------------------------------
+// Rules to derive keys. Always use a prefix to avoid security issues, such as data override from different protocols!
+//--------------------------------------------------------------------
+fn aid(sid: &str) -> String { format!("aid-{}", sid) }                              // authorizations-id
+fn cid(sid: &str, target: &str) -> String { format!("cid-{}-{}", sid, target) }     // consent-id
+fn eid(session: &str, kid: &str) -> String { format!("eid-{}-{}", kid, session) }   // master-key-id (evidence)
+fn pid(kid: &str) -> String { format!("pid-{}", kid) }                              // master-key-pair-id
+fn sid(sid: &str) -> String { format!("sid-{}", sid) }                              // subject-id
+fn vid(session: &str, kid: &str) -> String { format!("vid-{}-{}", kid, session) }   // master-key-vote-id
 
 //--------------------------------------------------------------------
 // AppDB where the application data results are stored 
@@ -42,14 +55,23 @@ impl AppDB {
         }
     }
 
-    pub fn get_subject(&self, sid: &str) -> Result<Option<Subject>> {
-        get(&self.global, sid)
+    pub fn get_state(&self) -> Result<Vec<u8>> {
+        let state: Option<IVec> = self.global.get(STATE).map_err(|e| format!("Unable to get app state: {}", e))?;
+        match state {
+            None => return Err("No app state available!".into()),
+            Some(state) => Ok(state.to_vec())
+        }
+    }
+
+    pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
+        let sid = sid(id);
+        get(&self.global, &sid)
     }
 
     pub fn save_subject(&self, subject: Subject) -> Result<()> {
-        let sid = subject.sid.clone();
+        let sid = sid(&subject.sid);
 
-        let current: Option<Subject> = self.get_subject(&sid)?;
+        let current: Option<Subject> = get(&self.global, &sid)?;
         match current {
             None => set(&self.global, &sid, subject),
             Some(mut current) => {
@@ -60,18 +82,18 @@ impl AppDB {
     }
 
     pub fn get_authorizations(&self, sid: &str) -> Result<Authorizations> {
-        let aid = Authorizations::id(sid);
+        let aid = aid(sid);
 
         let auths: Option<Authorizations> = get(&self.global, &aid)?;
         match auths {
-            None => Ok(Authorizations::new(sid)),
+            None => Ok(Authorizations::new()),
             Some(obj) => Ok(obj)
         }
     }
 
     pub fn save_authorization(&self, consent: Consent) -> Result<()> {
-        let cid = Consent::id(&consent.sid, &consent.target);
-        let aid = Authorizations::id(&consent.sid);
+        let cid = cid(&consent.sid, &consent.target);
+        let aid = aid(&consent.sid);
 
         let mut auths = self.get_authorizations(&consent.sid)?;
         match consent.typ {
@@ -86,17 +108,17 @@ impl AppDB {
     }
 
     pub fn get_vote(&self, session: &str, kid: &str) -> Result<Option<MasterKeyVote>> {
-        let vid = MasterKeyVote::id(session, kid);
+        let vid = vid(session, kid);
         get(&self.local, &vid)
     }
 
     pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
-        let vid = MasterKeyVote::id(&vote.session, &vote.kid);
+        let vid = vid(&vote.session, &vote.kid);
         set(&self.local, &vid, vote)
     }
 
     pub fn get_key(&self, kid: &str) -> Result<Option<MasterKeyPair>> {
-        let kid = MasterKeyPair::id(&kid);
+        let kid = pid(&kid);
 
         let cached = self.cache.get(&kid)?;
         if cached.is_some() {
@@ -114,7 +136,7 @@ impl AppDB {
     }
 
     pub fn get_key_evidence(&self, session: &str, kid: &str) -> Result<Option<MasterKey>> {
-        let eid = MasterKey::id(&session, &kid);
+        let eid = eid(&session, &kid);
         get(&self.global, &eid)
     }
 
@@ -126,8 +148,8 @@ impl AppDB {
         }
 
         // evidence keeps history for key
-        let eid = MasterKey::id(&evidence.session, &evidence.kid);
-        let kid = MasterKeyPair::id(&pair.kid);
+        let eid = eid(&evidence.session, &evidence.kid);
+        let kid = pid(&pair.kid);
 
         set(&self.global, &eid, evidence)?;
         set(&self.local, &kid, pair)
@@ -142,42 +164,28 @@ impl AppDB {
 //--------------------------------------------------------------------
 pub struct DbTx<'a> {
     pub tree: &'a TransactionalTree,
-    pub state: Mutex<RefCell<Option<Vec<u8>>>>
+    pub state: RefCell<Sha512>
 }
 
 impl<'a> DbTx<'a> {
-    pub fn new(tree: &'a TransactionalTree) -> Self {
-        Self { tree, state: Mutex::new(RefCell::new(None))}
+    pub fn new(tree: &'a TransactionalTree, hasher: Sha512) -> Self {
+        Self { tree, state: RefCell::new(hasher)}
     }
 
     pub fn set<T: Serialize>(&self, id: &str, obj: T) -> Result<()> {
-        if id == STATE {
-            return Err(format!("Cannot use reserved key {:?}!", STATE))
-        }
-
         let data = encode(&obj)?;
 
-        // update app state---------------------------
-        let mut hasher = Sha512::new();
-        hasher.input(&data);
-        {
-            let guard = self.state.lock().unwrap();
-            let mut value = guard.borrow_mut();
-            if let Some(c_state) = value.as_ref() {
-                hasher.input(c_state);
-            }
-            *value = Some(hasher.result().to_vec());
-        }
-        // update app state---------------------------
+        // update app state
+        let mut value = self.state.borrow_mut();
+        value.input(&data);
 
         self.tree.insert(id, data).map_err(|e| format!("Unable to set structure: {}", e))?;
         Ok(())
     }
 
-    pub fn state(self) -> Option<Vec<u8>> {
-        let guard = self.state.lock().unwrap();
-        let mut value = guard.borrow_mut();
-        value.take()
+    pub fn state(self) -> Vec<u8> {
+        let value = self.state.into_inner();
+        value.result().to_vec()
     }
 }
 
@@ -201,17 +209,24 @@ fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
     let commit = Rc::new(RefCell::new(Some(commit)));
     db.transaction(move |db| {
         let call = commit.borrow_mut().take().unwrap();
-        
-        let db_tx = DbTx::new(db);
+
+        // get app-state
+        let mut state: Option<IVec> = db.get(STATE)?;
+        let mut hasher = Sha512::new();
+        if let Some(state) = state.take() {
+            hasher.input(&state);
+        }
+
+        // execute transactions and chain state
+        let db_tx = DbTx::new(db, hasher);
         call(&db_tx).map_err(|e| {
             error!("tx-abort: {}", e);
             TransactionError::Abort
         })?;
 
         // update app-state
-        if let Some(state) = db_tx.state() {
-            db.insert(STATE, state)?;
-        }
+        let state = db_tx.state();
+        db.insert(STATE, state)?;
         
         Ok(())
     }).map_err(|e| format!("Unable to save structure: {}", e))?;
