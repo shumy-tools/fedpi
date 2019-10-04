@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
 use crate::crypto::shares::RistrettoShare;
-use crate::{Result, ID, Scalar, RistrettoPoint};
+use crate::{Result, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // Disclose Request
@@ -17,12 +17,6 @@ pub struct DiscloseRequest {
     
     pub sig: IndSignature,                          // Signature from data-subject
     #[serde(skip)] _phantom: () // force use of constructor
-}
-
-impl ID for DiscloseRequest {
-    fn id(&self) -> String {
-        self.sig.sig.encoded.clone()
-    }
 }
 
 impl DiscloseRequest {
@@ -63,12 +57,6 @@ pub struct DiscloseResult {
 
     pub sig: IndSignature,                          // Signature from peer
     #[serde(skip)] _phantom: () // force use of constructor
-}
-
-impl ID for DiscloseResult {
-    fn id(&self) -> String {
-        self.sig.sig.encoded.clone()
-    }
 }
 
 impl DiscloseResult {

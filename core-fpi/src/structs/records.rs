@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::Signature;
-use crate::{OPEN, CLOSE, ID, Result, Scalar, RistrettoPoint};
+use crate::{OPEN, CLOSE, Result, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // An anonymous profile record
@@ -12,12 +12,6 @@ pub struct Record {
     pub data: Vec<u8>,                      // TODO: data fields may release some info connecting different streams!
     pub sig: Signature,
     _phantom: () // force use of constructor
-}
-
-impl ID for Record {
-    fn id(&self) -> String {
-        self.sig.encoded.clone()
-    }
 }
 
 impl Record {
@@ -42,7 +36,7 @@ impl Record {
                     return Err("The stream is closed!".into())
                 }
 
-                if self.prev != *last.id() {
+                if self.prev != last.sig.encoded {
                     return Err("Record is not part of the stream!".into())
                 }
 
@@ -119,7 +113,7 @@ mod tests {
         let pseudonym1 = secret1 * base;
 
         let r_data2 = "next data2".as_bytes().to_vec();
-        let record2 = Record::sign(&record.id(), r_data2, &base, &secret1, &pseudonym1);
+        let record2 = Record::sign(&record.sig.encoded, r_data2, &base, &secret1, &pseudonym1);
         assert!(record2.check(Some(&record), &base, &pseudonym) == Err("Last record doesn't match the key for the signature!".into()));
     }
 }

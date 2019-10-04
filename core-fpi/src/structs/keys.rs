@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use crate::{Result, ID, Scalar, RistrettoPoint};
+use crate::{Result, Scalar, RistrettoPoint};
 use crate::shares::{Share, RistrettoPolynomial};
 use crate::signatures::{IndSignature, ExtSignature};
 
@@ -57,12 +57,6 @@ pub struct MasterKeyVote {
     pub sig: IndSignature
 }
 
-impl ID for MasterKeyVote {
-    fn id(&self) -> String {
-        self.session.clone()
-    }
-}
-
 impl Debug for MasterKeyVote {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         let peers = bs58::encode(&self.peers).into_string();
@@ -79,6 +73,10 @@ impl Debug for MasterKeyVote {
 }
 
 impl MasterKeyVote {
+    pub fn id(session: &str, kid: &str) -> String {
+        format!("mkv-{}-{}", kid, session)
+    }
+
     pub fn sign(session: &str, kid: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
         let data = Self::data(session, kid, peers, &shares, &pkeys, &commit);
         Self {
@@ -162,13 +160,11 @@ pub struct MasterKey {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
-impl ID for MasterKey {
-    fn id(&self) -> String {
-        format!("mk-{}-{}", self.session, self.kid)
-    }
-}
-
 impl MasterKey {
+    pub fn id(session: &str, kid: &str) -> String {
+        format!("mke-{}-{}", kid, session)
+    }
+
     pub fn sign(session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Result<Self> {
         // expecting responses from all peers
         if votes.len() != n {
@@ -347,8 +343,8 @@ pub struct MasterKeyPair {
     pub public: RistrettoPoint
 }
 
-impl ID for MasterKeyPair {
-    fn id(&self) -> String {
-        self.kid.clone()
+impl MasterKeyPair {
+    pub fn id(kid: &str) -> String {
+        format!("mkp-{}", kid)
     }
 }

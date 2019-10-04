@@ -4,11 +4,13 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::sync::Mutex;
 
-use sled::{Db, IVec, TransactionError, TransactionalTree};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+use sled::{Db, IVec, TransactionError, TransactionalTree};
 use log::error;
 
-use core_fpi::{ID, Result};
+use core_fpi::Result;
 use core_fpi::ids::*;
 use core_fpi::keys::*;
 use core_fpi::authorizations::*;
@@ -27,8 +29,8 @@ pub struct AppDB {
 
 impl AppDB {
     pub fn new(home: &str) -> Self {
-        let local_file = format!("{}/app_local.db", home);
-        let global_file = format!("{}/app_global.db", home);
+        let local_file = format!("{}/app/local.db", home);
+        let global_file = format!("{}/app/global.db", home);
 
         // nothing to do here, just let it panic
         Self {
@@ -49,9 +51,23 @@ impl AppDB {
         }
     }
 
+    pub fn save_subject(&self, subject: Subject) -> Result<()> {
+        let sid = subject.sid.clone();
+
+        let current: Option<Subject> = self.get_subject(&sid)?;
+        match current {
+            None => set(&self.global, &sid, subject),
+            Some(mut current) => {
+                current.merge(subject);
+                set(&self.global, &sid, current)
+            }
+        }
+    }
+
     pub fn get_authorizations(&self, sid: &str) -> Result<Authorizations> {
-        let id = format!("auth-{}", sid);
-        let res: Option<IVec> = self.global.get(id).map_err(|e| format!("Unable to get authorizations for sid: {}", e))?;
+        let aid = Authorizations::id(sid);
+
+        let res: Option<IVec> = self.global.get(aid).map_err(|e| format!("Unable to get authorizations for sid: {}", e))?;
         match res {
             None => Ok(Authorizations::new(sid)),
             Some(data) => {
@@ -61,8 +77,27 @@ impl AppDB {
         }
     }
 
-    pub fn get_vote(&self, id: &str) -> Result<Option<MasterKeyVote>> {
-        let res: Option<IVec> = self.local.get(id).map_err(|e| format!("Unable to get vote by id: {}", e))?;
+    pub fn save_authorization(&self, consent: Consent) -> Result<()> {
+        let cid = Consent::id(&consent.sid, &consent.target);
+        let aid = Authorizations::id(&consent.sid);        
+
+        let mut auths = self.get_authorizations(&aid)?;
+        match consent.typ {
+            ConsentType::Consent => auths.authorize(&consent),
+            ConsentType::Revoke => auths.revoke(&consent)
+        }
+        
+        tx(&self.global, |tx| {
+            tx.set(&cid, consent)?;
+            tx.set(&aid, auths)?;
+            Ok(())
+        })
+    }
+
+    pub fn get_vote(&self, session: &str, kid: &str) -> Result<Option<MasterKeyVote>> {
+        let vid = MasterKeyVote::id(session, kid);
+
+        let res: Option<IVec> = self.local.get(vid).map_err(|e| format!("Unable to get vote by id: {}", e))?;
         match res {
             None => Ok(None),
             Some(data) => {
@@ -72,121 +107,98 @@ impl AppDB {
         }
     }
 
-    pub fn get_key(&self, id: &str) -> Result<Option<MasterKeyPair>> {
-        let cached = self.cache.get(id)?;
+    pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
+        let vid = MasterKeyVote::id(&vote.session, &vote.kid);
+
+        set(&self.local, &vid, vote)
+    }
+
+    pub fn get_key(&self, kid: &str) -> Result<Option<MasterKeyPair>> {
+        let kid = MasterKeyPair::id(&kid);
+
+        let cached = self.cache.get(&kid)?;
         if cached.is_some() {
             return Ok(cached)
         }
 
-        let res: Option<IVec> = self.local.get(id).map_err(|e| format!("Unable to get master-key by id: {}", e))?;
+        let res: Option<IVec> = self.local.get(&kid).map_err(|e| format!("Unable to get master-key by id: {}", e))?;
         match res {
             None => Ok(None),
             Some(data) => {
                 let obj: MasterKeyPair = decode(&data)?;
-                self.cache.set(id, obj.clone());
+                self.cache.set(&kid, obj.clone());
                 Ok(Some(obj))
             }
         }
     }
 
-    pub fn save_subject(&self, subject: Subject) -> Result<()> {
-        let id = &subject.id();
-        let current: Option<Subject> = self.get_subject(id)?;
-        match current {
-            None => self.global_save(id, subject),
-            Some(mut current) => {
-                current.merge(subject);
-                self.global_save(id, current)
-            }
-        }
-    }
-
-    pub fn save_authorization(&self, consent: Consent) -> Result<()> {
-        let mut auths = self.get_authorizations(&consent.sid)?;
-        match consent.typ {
-            ConsentType::Consent => auths.authorize(&consent),
-            ConsentType::Revoke => auths.revoke(&consent)
-        }
-        
-        self.global_tx(|tx| {
-            tx.set(consent)?;
-            tx.set(auths)?;
-            Ok(())
-        })
-    }
-
-    pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
-        self.local_save(&vote.id(), vote)
-    }
-
     pub fn save_key(&self, evidence: MasterKey, pair: MasterKeyPair) -> Result<()> {
-        self.global_save(&evidence.id(), evidence)?;
-        self.local_save(&pair.id(), pair)
-    }
+        if evidence.kid != pair.kid {
+            // if it executes it's a bug in the code
+            panic!("evidence.kid != pair.kid");
+        }
 
+        let eid = MasterKey::id(&evidence.session, &evidence.kid);
+        let kid = MasterKeyPair::id(&pair.kid);
 
-
-    /*fn local_tx<T: FnOnce(DbTx) -> Result<()>>(&self, commit: T) -> Result<()> {
-        // BIG fucking hack so I can call the closure!!!
-        let commit = Rc::new(RefCell::new(Some(commit)));
-        self.local.transaction(move |db| {
-            let call = commit.borrow_mut().take().unwrap();
-            call(DbTx(db)).map_err(|e| {
-                error!("tx-abort: {}", e);
-                TransactionError::Abort
-            })?;
-
-            Ok(())
-        }).map_err(|e| format!("Unable to save structure: {}", e))?;
-
-        self.local.flush().map_err(|e| format!("Unable to flush: {}", e))?;
-        Ok(())
-    }*/
-
-    fn global_tx<T: FnOnce(DbTx) -> Result<()>>(&self, commit: T) -> Result<()> {
-        // BIG fucking hack so I can call the closure!!!
-        let commit = Rc::new(RefCell::new(Some(commit)));
-        self.global.transaction(move |db| {
-            let call = commit.borrow_mut().take().unwrap();
-            call(DbTx(db)).map_err(|e| {
-                error!("tx-abort: {}", e);
-                TransactionError::Abort
-            })?;
-
-            Ok(())
-        }).map_err(|e| format!("Unable to save structure: {}", e))?;
-
-        self.global.flush().map_err(|e| format!("Unable to flush: {}", e))?;
-        Ok(())
-    }
-
-    fn local_save<T: Serialize + ID>(&self, id: &str, obj: T) -> Result<()> {
-        let data = encode(&obj)?;
-        self.local.insert(id, data).map_err(|e| format!("Unable to insert structure: {}", e))?;
-        self.local.flush().map_err(|e| format!("Unable to flush: {}", e))?;
-        Ok(())
-    }
-
-    fn global_save<T: Serialize + ID>(&self, id: &str, obj: T) -> Result<()> {
-        let data = encode(&obj)?;
-        self.global.insert(id, data).map_err(|e| format!("Unable to insert structure: {}", e))?;
-        self.global.flush().map_err(|e| format!("Unable to flush: {}", e))?;
-        Ok(())
+        set(&self.global, &eid, evidence)?;
+        set(&self.local, &kid, pair)
     }
 }
 
+
+
+
+//--------------------------------------------------------------------
+// Generic database functions and structures
+//--------------------------------------------------------------------
 pub struct DbTx<'a> (pub &'a TransactionalTree);
 
 impl<'a> DbTx<'a> {
-    pub fn set<T: Serialize + ID>(&self, obj: T) -> Result<()> {
+    pub fn set<T: Serialize>(&self, id: &str, obj: T) -> Result<()> {
         let data = encode(&obj)?;
-        self.save(&obj.id(), &data)
+        self.save(id, &data)
     }
 
     pub fn save(&self, id: &str, data: &[u8]) -> Result<()> {
         self.0.insert(id, data).map_err(|e| format!("Unable to save structure: {}", e))?;
         Ok(())
     }
+}
+
+fn get<T: DeserializeOwned>(db: &Db, id: &str) -> Result<Option<T>> {
+    let res: Option<IVec> = db.get(id).map_err(|e| format!("Unable to get structure by id: {}", e))?;
+    match res {
+        None => Ok(None),
+        Some(data) => {
+            let obj: T = decode(&data)?;
+            Ok(Some(obj))
+        }
+    }
+}
+
+fn set<T: Serialize>(db: &Db, id: &str, obj: T) -> Result<()> {
+    let data = encode(&obj)?;
+    db.insert(id, data).map_err(|e| format!("Unable to insert structure: {}", e))?;
+    db.flush().map_err(|e| format!("Unable to flush: {}", e))?;
+    Ok(())
+}
+
+fn tx<T: FnOnce(DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
+    // BIG fucking hack so I can call the closure!!!
+    let commit = Rc::new(RefCell::new(Some(commit)));
+    db.transaction(move |db| {
+        let call = commit.borrow_mut().take().unwrap();
+        call(DbTx(db)).map_err(|e| {
+            error!("tx-abort: {}", e);
+            TransactionError::Abort
+        })?;
+
+        Ok(())
+    }).map_err(|e| format!("Unable to save structure: {}", e))?;
+
+    db.flush().map_err(|e| format!("Unable to flush: {}", e))?;
+    Ok(())
 }
 
 //--------------------------------------------------------------------

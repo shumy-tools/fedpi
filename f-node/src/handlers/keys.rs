@@ -29,7 +29,7 @@ impl MasterKeyHandler {
             return Err("Client has not authorization to negotiate master-key!".into())
         }
 
-        if let Some(vote) = self.db.get_vote(&req.session)? {
+        if let Some(vote) = self.db.get_vote(&req.session, &req.kid)? {
             let msg = Response::Vote(Vote::VMasterKeyVote(vote.clone()));
             return encode(&msg)
         }

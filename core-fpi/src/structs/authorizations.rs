@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
-use crate::{ID, Result, Scalar};
+use crate::{Result, Scalar};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject Authorizations
@@ -14,13 +14,11 @@ pub struct Authorizations {
     auths: HashMap<String, HashSet<String>>       // All profile authorizations per subject <subject: <profile>>
 }
 
-impl ID for Authorizations {
-    fn id(&self) -> String {
-        format!("auth-{}", self.sid)
-    }
-}
-
 impl Authorizations {
+    pub fn id(sid: &str) -> String {
+        format!("auth-{}", sid)
+    }
+
     pub fn new(sid: &str) -> Self {
         Self { sid: sid.into(), auths: HashMap::new() }
     }
@@ -83,13 +81,11 @@ pub struct Consent {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
-impl ID for Consent {
-    fn id(&self) -> String {
-        self.sig.sig.encoded.clone()
-    }
-}
-
 impl Consent {
+    pub fn id(sid: &str, target: &str) -> String {
+        format!("cons-{}-{}", sid, target)
+    }
+
     pub fn sign(sid: &str, typ: ConsentType, target: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let sig_data = Self::data(sid, &typ, target, profiles);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);

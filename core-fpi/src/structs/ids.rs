@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 use crate::crypto::signatures::IndSignature;
-use crate::{G, rnd_scalar, ID, Result, KeyEncoder, Scalar, RistrettoPoint};
+use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
 // Subject
@@ -16,12 +16,6 @@ pub struct Subject {
     pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
 
     #[serde(skip)] _phantom: () // force use of constructor
-}
-
-impl ID for Subject {
-    fn id(&self) -> String {
-        self.sid.clone()
-    }
 }
 
 impl Debug for Subject {
