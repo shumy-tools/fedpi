@@ -79,7 +79,15 @@ impl DiscloseResult {
         Self { disclose: disclose.into(), keys, sig, _phantom: () }
     }
 
-    pub fn check(&self, key: &RistrettoPoint) -> Result<()> {
+    pub fn check(&self, disclose: &str, profiles: &[String], key: &RistrettoPoint) -> Result<()> {
+        if self.disclose != disclose {
+            return Err("DiscloseResult, expected the same disclose-id!".into())
+        }
+
+        if self.keys.profiles() != profiles {
+            return Err("DiscloseResult, expected the same profile list!".into())
+        }
+
         let sig_data = Self::data(&self.disclose, &self.keys);
         if !self.sig.verify(&key, &sig_data) {
             return Err("Invalid disclose-result signature!".into())
@@ -111,5 +119,9 @@ impl DiscloseKeys {
         let typs = self.keys.entry(typ.into()).or_insert_with(|| HashMap::<String, Vec<RistrettoShare>>::new());
         let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<RistrettoShare>::new());
         locs.push(share);
+    }
+
+    pub fn profiles(&self) -> Vec<String> {
+        self.keys.keys().map(|k| k.clone()).collect()
     }
 }

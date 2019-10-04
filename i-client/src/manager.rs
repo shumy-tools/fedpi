@@ -17,6 +17,7 @@ use core_fpi::consents::*;
 use core_fpi::disclosures::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
+use core_fpi::shares::*;
 
 use crate::config::{Peer, Config};
 
@@ -272,8 +273,19 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                     let res = (self.query)(&sel, Request::Query(Query::QDiscloseRequest(disclose.clone())))?;
                     match res {
                         Response::QResult(res) => match res {
-                            QResult::QDiscloseResult(disclose) => {
-                                results.insert(disclose.sig.index, disclose);
+                            QResult::QDiscloseResult(dr) => {
+                                let peer = self.config.peers.get(dr.sig.index).ok_or("Unexpected peer index!")
+                                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                                
+                                dr.check(&disclose.sig.sig.encoded, profiles, &peer.pkey)
+                                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+                                if results.get(&dr.sig.index).is_some() {
+                                    // TODO: replace this with ignore or retry strategy?
+                                    return Err(Error::new(ErrorKind::Other, "Replaced response on key disclosure!"))
+                                }
+
+                                results.insert(dr.sig.index, dr);
                             }
                         },
                         _ => return Err(Error::new(ErrorKind::Other, "Unexpected response on disclosure!"))
@@ -286,7 +298,33 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                     return Err(Error::new(ErrorKind::Other, "Not enought responses to process disclosure!"))
                 }
                 
-                // TODO: check and combine results to get pseudonyms
+                // check and combine results to get pseudonyms
+                let mut poly_shares = HashMap::<String, Vec<RistrettoShare>>::new();
+                for (n, dr) in results.into_iter() {
+                    for (typ, locs) in dr.keys.keys.into_iter() {
+                        for (loc, shares) in locs.into_iter() {
+                            for (i, rs) in shares.into_iter().enumerate() {
+                                if n + 1 != rs.i as usize {
+                                    return Err(Error::new(ErrorKind::Other, "Unexpected share index!"))
+                                }
+
+                                let key = format!("{}-{}-{}", typ, loc, i);
+                                let v_shares = poly_shares.entry(key).or_insert_with(|| Vec::<RistrettoShare>::new());
+                                v_shares.push(rs);
+                            }
+                        }
+                    }
+                }
+
+                for (key, shares) in poly_shares.iter() {
+                    let rpoly = RistrettoPolynomial::reconstruct(&shares);
+                    if rpoly.degree() != self.config.threshold {
+                        return Err(Error::new(ErrorKind::Other, "Incorrect set of shares!"))
+                    }
+
+                    let pseudo = rpoly.evaluate(&Scalar::zero());
+                    println!("PSEUDONYM {} -> {}", key, pseudo.encode());
+                }
 
                 Ok(())
             }
@@ -305,14 +343,15 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             match res {
                 Response::Vote(vote) => match vote {
                     Vote::VMasterKeyVote(vote) => {
+                        let peer = self.config.peers.get(vote.sig.index).ok_or("Unexpected peer index!")
+                            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                        
+                        vote.check(&session, &kid, &self.config.peers_hash, self.config.peers.len(), &peer.pkey)
+                            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
                         if votes.get(vote.sig.index).is_some() {
                             // TODO: replace this with ignore or retry strategy?
                             return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
-                        }
-
-                        if vote.sig.index > n-1 {
-                            // TODO: replace this with ignore or retry strategy?
-                            return Err(Error::new(ErrorKind::Other, "Unexpected peer index on key negotiation!"))
                         }
 
                         votes.insert(vote.sig.index, vote);
