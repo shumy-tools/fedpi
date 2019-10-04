@@ -266,7 +266,9 @@ impl Profile {
 
             let current_location = match current {
                 None => None,
-                Some(current) => current.locations.get(lurl)
+                Some(current) => {
+                    current.locations.get(lurl)
+                }
             };
 
             item.check(sid, &self.typ, current_location, sig_key)?;

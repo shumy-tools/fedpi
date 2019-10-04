@@ -10,7 +10,7 @@ Cargo.lock
 **/*.rs.bk
 test-net/**/write-file-atomic*
 test-net/**/addrbook.json
-test-net/**/data/*.*
+test-net/**/data/**
 
 *.sto
 *.mrg

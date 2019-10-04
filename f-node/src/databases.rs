@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use sled::{Db, IVec, TransactionError, TransactionalTree};
+use sha2::{Sha512, Digest};
 use log::error;
 
 use core_fpi::Result;
@@ -16,6 +17,7 @@ use core_fpi::keys::*;
 use core_fpi::authorizations::*;
 use core_fpi::messages::{encode, decode};
 
+pub const STATE: &str = "state";
 pub const MASTER: &str = "master";
 
 //--------------------------------------------------------------------
@@ -79,8 +81,7 @@ impl AppDB {
         
         tx(&self.global, |tx| {
             tx.set(&cid, consent)?;
-            tx.set(&aid, auths)?;
-            Ok(())
+            tx.set(&aid, auths)
         })
     }
 
@@ -139,17 +140,44 @@ impl AppDB {
 //--------------------------------------------------------------------
 // Generic database functions and structures
 //--------------------------------------------------------------------
-pub struct DbTx<'a> (pub &'a TransactionalTree);
+pub struct DbTx<'a> {
+    pub tree: &'a TransactionalTree,
+    pub state: Mutex<RefCell<Option<Vec<u8>>>>
+}
 
 impl<'a> DbTx<'a> {
-    pub fn set<T: Serialize>(&self, id: &str, obj: T) -> Result<()> {
-        let data = encode(&obj)?;
-        self.save(id, &data)
+    pub fn new(tree: &'a TransactionalTree) -> Self {
+        Self { tree, state: Mutex::new(RefCell::new(None))}
     }
 
-    pub fn save(&self, id: &str, data: &[u8]) -> Result<()> {
-        self.0.insert(id, data).map_err(|e| format!("Unable to save structure: {}", e))?;
+    pub fn set<T: Serialize>(&self, id: &str, obj: T) -> Result<()> {
+        if id == STATE {
+            return Err(format!("Cannot use reserved key {:?}!", STATE))
+        }
+
+        let data = encode(&obj)?;
+
+        // update app state---------------------------
+        let mut hasher = Sha512::new();
+        hasher.input(&data);
+        {
+            let guard = self.state.lock().unwrap();
+            let mut value = guard.borrow_mut();
+            if let Some(c_state) = value.as_ref() {
+                hasher.input(c_state);
+            }
+            *value = Some(hasher.result().to_vec());
+        }
+        // update app state---------------------------
+
+        self.tree.insert(id, data).map_err(|e| format!("Unable to set structure: {}", e))?;
         Ok(())
+    }
+
+    pub fn state(self) -> Option<Vec<u8>> {
+        let guard = self.state.lock().unwrap();
+        let mut value = guard.borrow_mut();
+        value.take()
     }
 }
 
@@ -165,22 +193,26 @@ fn get<T: DeserializeOwned>(db: &Db, id: &str) -> Result<Option<T>> {
 }
 
 fn set<T: Serialize>(db: &Db, id: &str, obj: T) -> Result<()> {
-    let data = encode(&obj)?;
-    db.insert(id, data).map_err(|e| format!("Unable to insert structure: {}", e))?;
-    db.flush().map_err(|e| format!("Unable to flush: {}", e))?;
-    Ok(())
+    tx(db, |tx| { tx.set(id, obj) })
 }
 
-fn tx<T: FnOnce(DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
+fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
     // BIG fucking hack so I can call the closure!!!
     let commit = Rc::new(RefCell::new(Some(commit)));
     db.transaction(move |db| {
         let call = commit.borrow_mut().take().unwrap();
-        call(DbTx(db)).map_err(|e| {
+        
+        let db_tx = DbTx::new(db);
+        call(&db_tx).map_err(|e| {
             error!("tx-abort: {}", e);
             TransactionError::Abort
         })?;
 
+        // update app-state
+        if let Some(state) = db_tx.state() {
+            db.insert(STATE, state)?;
+        }
+        
         Ok(())
     }).map_err(|e| format!("Unable to save structure: {}", e))?;
 
