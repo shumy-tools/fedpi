@@ -53,9 +53,9 @@ fn main() {
                 .takes_value(true)
                 .required(true)))
         .subcommand(SubCommand::with_name("consent")
-            .about("Authorize full-disclosure to a client-key for a set of profiles")
+            .about("Authorize full-disclosure to another subject-id for a set of profiles")
             .arg(Arg::with_name("auth")
-                .help("Authorized key")
+                .help("Authorized subject-id")
                 .takes_value(true)
                 .required(true))
             .arg(Arg::with_name("profiles")
@@ -64,9 +64,14 @@ fn main() {
                 .takes_value(true)
                 .required(true)))
         .subcommand(SubCommand::with_name("revoke")
-            .about("Revoke a previous registered consent")
-            .arg(Arg::with_name("consent")
-                .help("Select the consent")
+            .about("Revoke a previous authorizations")
+            .arg(Arg::with_name("auth")
+                .help("Authorized subject-id")
+                .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("profiles")
+                .help("Selects a set of profile types")
+                .min_values(1)
                 .takes_value(true)
                 .required(true)))
         .subcommand(SubCommand::with_name("disclose")
@@ -182,9 +187,11 @@ fn main() {
         }
     } else if matches.is_present("revoke") {
         let matches = matches.subcommand_matches("revoke").unwrap();
-        let consent = matches.value_of("consent").unwrap().to_owned();
+        let auth = matches.value_of("auth").unwrap().to_owned();
+        let profiles: Vec<&str> = matches.values_of("profiles").unwrap().collect();
+        let profiles: Vec<String> = profiles.iter().map(|v| v.to_string()).collect();
 
-        if let Err(e) = sm.revoke(&consent) {
+        if let Err(e) = sm.revoke(&auth, &profiles) {
             println!("ERROR -> {}", e);
         }
     } else if matches.is_present("disclose") {

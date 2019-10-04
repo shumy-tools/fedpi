@@ -97,7 +97,6 @@ pub enum Evidence {
 pub enum Value {
     VSubject(Subject),
     VConsent(Consent),
-    VRevokeConsent(RevokeConsent),
 
     VNewRecord(NewRecord)
 }

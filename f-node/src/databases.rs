@@ -100,10 +100,9 @@ impl AppDB {
         })
     }
 
-    pub fn save_revoke(&self, revoke: RevokeConsent) -> Result<()> {
-        let consent: Consent = self.get_consent(&revoke.consent)?.ok_or("Consent not found!")?;
+    pub fn save_revoke(&self, revoke: Consent) -> Result<()> {
         let mut current: Subject = self.get_subject(&revoke.sid)?.ok_or("Subject not found!")?;
-        current.revoke(&consent);
+        current.revoke(&revoke);
         
         self.global_tx(|tx| {
             tx.set(revoke)?;

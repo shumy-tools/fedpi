@@ -11,7 +11,7 @@ use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, ID, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
+use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::consents::*;
 use core_fpi::disclosures::*;
@@ -212,7 +212,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
 
-                let consent = Consent::sign(&self.sid, authorized, profiles, &my.secret, skey);
+                let consent = Consent::sign(&self.sid, ConsentType::Consent, authorized, profiles, &my.secret, skey);
                 consent.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 // sync update
@@ -224,19 +224,19 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         }
     }
 
-    pub fn revoke(&mut self, consent_id: &str) -> Result<()> {
+    pub fn revoke(&mut self, authorized: &str, profiles: &[String]) -> Result<()> {
         self.check_pending()?;
         
         match &self.sto {
             None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
-                my.consents.get(consent_id).ok_or_else(|| Error::new(ErrorKind::Other, "No consent found!"))?;
-
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
-                let revoke = RevokeConsent::sign(&self.sid, consent_id, &my.secret, skey);
+                
+                let revoke = Consent::sign(&self.sid, ConsentType::Revoke, authorized, profiles, &my.secret, skey);
+                revoke.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 // sync update
-                let update = Update { sid: self.sid.clone(), msg: Value::VRevokeConsent(revoke), secret: my.secret, profile_secrets: HashMap::new() };
+                let update = Update { sid: self.sid.clone(), msg: Value::VConsent(revoke), secret: my.secret, profile_secrets: HashMap::new() };
         
                 Storage::update(&self.home, &self.sid, &update)?;
                 self.upd = Some(update);
@@ -414,8 +414,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                     MySubject {
                        secret: update.secret,
                        profile_secrets: update.profile_secrets,
-                       subject: value,
-                       consents: HashMap::new()
+                       subject: value
                     }
                 } else {
                     return Err(Error::new(ErrorKind::Other, "There is not subject in the store!"))
@@ -425,14 +424,10 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             Some(mut my) => {
                 match update.msg {
                     Value::VConsent(value) => {
-                        my.subject.authorize(&value);
-                        my.consents.insert(value.id().into(), value);
-                    },
-
-                    Value::VRevokeConsent(value) => {
-                        let consent = my.consents.get(&value.consent).ok_or_else(|| Error::new(ErrorKind::Other, "No consent found!"))?;
-                        my.subject.revoke(&consent);
-                        my.consents.remove(&value.consent);
+                        match value.typ {
+                            ConsentType::Consent => my.subject.authorize(&value),
+                            ConsentType::Revoke => my.subject.revoke(&value)
+                        }
                     },
 
                     Value::VSubject(value) => {
@@ -489,9 +484,7 @@ pub struct Update {
 pub struct MySubject {
     secret: Scalar,                                 // current subject-key secret
     profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
-
-    subject: Subject,
-    consents: HashMap<String, Consent>
+    subject: Subject
 }
 
 impl Drop for MySubject {
@@ -510,7 +503,6 @@ impl Debug for MySubject {
             .field("secret", &self.secret.encode())
             .field("profile_secrets", &p_secrets)
             .field("subject", &self.subject)
-            .field("consents", &self.consents)
             .finish()
     }
 }

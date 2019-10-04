@@ -16,29 +16,19 @@ impl ConsentHandler {
         Self { db }
     }
 
-    pub fn check_consent(&self, consent: &Consent) -> Result<()> {
-        info!("CHECK-CONSENT - (id = {:?}, sid = {:?}, auth = {:?}, #profiles = {:?})", consent.id(), consent.sid, consent.authorized, consent.profiles.len());
+    pub fn check(&self, consent: &Consent) -> Result<()> {
+        info!("CHECK-CONSENT - (id = {:?}, sid = {:?}, typ = {:?}, auth = {:?}, #profiles = {:?})", consent.id(), consent.sid, consent.typ, consent.authorized, consent.profiles.len());
         
         let current: Subject = self.db.get_subject(&consent.sid)?.ok_or("Subject not found!")?;
         consent.check(&current)
     }
 
-    pub fn check_revoke(&self, revoke: &RevokeConsent) -> Result<()> {
-        info!("CHECK-REVOKE - (id = {:?}, sid = {:?}, consent = {:?})", revoke.id(), revoke.sid, revoke.consent);
-        
-        let current: Subject = self.db.get_subject(&revoke.sid)?.ok_or("Subject not found!")?;
-        revoke.check(&current)
-    }
-
-    pub fn commit_consent(&mut self, consent: Consent) -> Result<()> {
+    pub fn commit(&mut self, consent: Consent) -> Result<()> {
         //self.check_consent(&consent)?;
         info!("COMMIT-CONSENT - (id = {:?})", consent.id());
-        self.db.save_consent(consent)
-    }
-
-    pub fn commit_revoke(&mut self, revoke: RevokeConsent) -> Result<()> {
-        //self.check_revoke(&revoke)?;
-        info!("COMMIT-REVOKE - (id = {:?})", revoke.id());
-        self.db.save_revoke(revoke)
+        match consent.typ {
+            ConsentType::Consent => self.db.save_consent(consent),
+            ConsentType::Revoke => self.db.save_revoke(consent)
+        }
     }
 }

@@ -77,14 +77,8 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("CHECK - Value::VConsent");
-                    self.consent_handler.check_consent(&consent).map_err(|e|{
+                    self.consent_handler.check(&consent).map_err(|e|{
                         error!("CHECK-ERR - Value::VConsent - {:?}", e);
-                    e})
-                },
-                Value::VRevokeConsent(revoke) => {
-                    info!("CHECK - Value::VRevokeConsent");
-                    self.consent_handler.check_revoke(&revoke).map_err(|e|{
-                        error!("CHECK-ERR - Value::VRevokeConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())
@@ -113,14 +107,8 @@ impl Processor {
                 },
                 Value::VConsent(consent) => {
                     info!("COMMIT - Value::VConsent");
-                    self.consent_handler.commit_consent(consent).map_err(|e|{
+                    self.consent_handler.commit(consent).map_err(|e|{
                         error!("COMMIT-ERR - Value::VConsent - {:?}", e);
-                    e})
-                },
-                Value::VRevokeConsent(revoke) => {
-                    info!("COMMIT - Value::VRevokeConsent");
-                    self.consent_handler.commit_revoke(revoke).map_err(|e|{
-                        error!("COMMIT-ERR - Value::VRevokeConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())
