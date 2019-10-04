@@ -41,14 +41,7 @@ impl AppDB {
     }
 
     pub fn get_subject(&self, sid: &str) -> Result<Option<Subject>> {
-        let res: Option<IVec> = self.global.get(sid).map_err(|e| format!("Unable to get subject by sid: {}", e))?;
-        match res {
-            None => Ok(None),
-            Some(data) => {
-                let obj: Subject = decode(&data)?;
-                Ok(Some(obj))
-            }
-        }
+        get(&self.global, sid)
     }
 
     pub fn save_subject(&self, subject: Subject) -> Result<()> {
@@ -67,21 +60,18 @@ impl AppDB {
     pub fn get_authorizations(&self, sid: &str) -> Result<Authorizations> {
         let aid = Authorizations::id(sid);
 
-        let res: Option<IVec> = self.global.get(aid).map_err(|e| format!("Unable to get authorizations for sid: {}", e))?;
-        match res {
+        let auths: Option<Authorizations> = get(&self.global, &aid)?;
+        match auths {
             None => Ok(Authorizations::new(sid)),
-            Some(data) => {
-                let obj: Authorizations = decode(&data)?;
-                Ok(obj)
-            }
+            Some(obj) => Ok(obj)
         }
     }
 
     pub fn save_authorization(&self, consent: Consent) -> Result<()> {
         let cid = Consent::id(&consent.sid, &consent.target);
-        let aid = Authorizations::id(&consent.sid);        
+        let aid = Authorizations::id(&consent.sid);
 
-        let mut auths = self.get_authorizations(&aid)?;
+        let mut auths = self.get_authorizations(&consent.sid)?;
         match consent.typ {
             ConsentType::Consent => auths.authorize(&consent),
             ConsentType::Revoke => auths.revoke(&consent)
@@ -96,20 +86,11 @@ impl AppDB {
 
     pub fn get_vote(&self, session: &str, kid: &str) -> Result<Option<MasterKeyVote>> {
         let vid = MasterKeyVote::id(session, kid);
-
-        let res: Option<IVec> = self.local.get(vid).map_err(|e| format!("Unable to get vote by id: {}", e))?;
-        match res {
-            None => Ok(None),
-            Some(data) => {
-                let obj: MasterKeyVote = decode(&data)?;
-                Ok(Some(obj))
-            }
-        }
+        get(&self.local, &vid)
     }
 
     pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
         let vid = MasterKeyVote::id(&vote.session, &vote.kid);
-
         set(&self.local, &vid, vote)
     }
 
@@ -121,23 +102,29 @@ impl AppDB {
             return Ok(cached)
         }
 
-        let res: Option<IVec> = self.local.get(&kid).map_err(|e| format!("Unable to get master-key by id: {}", e))?;
-        match res {
+        let mkey: Option<MasterKeyPair> = get(&self.local, &kid)?;
+        match mkey {
             None => Ok(None),
-            Some(data) => {
-                let obj: MasterKeyPair = decode(&data)?;
+            Some(obj) => {
                 self.cache.set(&kid, obj.clone());
                 Ok(Some(obj))
             }
         }
     }
 
+    pub fn get_key_evidence(&self, session: &str, kid: &str) -> Result<Option<MasterKey>> {
+        let eid = MasterKey::id(&session, &kid);
+        get(&self.global, &eid)
+    }
+
     pub fn save_key(&self, evidence: MasterKey, pair: MasterKeyPair) -> Result<()> {
         if evidence.kid != pair.kid {
             // if it executes it's a bug in the code
+            error!("Bug detected when executing AppDB::save_key");
             panic!("evidence.kid != pair.kid");
         }
 
+        // evidence keeps history for key
         let eid = MasterKey::id(&evidence.session, &evidence.kid);
         let kid = MasterKeyPair::id(&pair.kid);
 

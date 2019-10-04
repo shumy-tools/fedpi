@@ -48,8 +48,8 @@ impl Drop for Config {
 }
 
 impl Config {
-    pub fn new(home: &str) -> Self {
-        let filename = format!("{}/app.config.toml", home);
+    pub fn new(home: &str, sid: &str) -> Self {
+        let filename = format!("{}/{}.toml", home, sid);
         
         let cfg = match std::fs::read_to_string(&filename) {
             Ok(content) => content,

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use serde::{Serialize, Deserialize};
 
 use crate::ids::*;
@@ -72,7 +72,7 @@ impl DiscloseResult {
             return Err("DiscloseResult, expected the same disclose-id!".into())
         }
 
-        if self.keys.profiles() != profiles {
+        if !self.keys.constains_the_same(profiles) {
             return Err("DiscloseResult, expected the same profile list!".into())
         }
 
@@ -95,7 +95,7 @@ impl DiscloseResult {
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct DiscloseKeys {
-    pub keys: HashMap<String, HashMap<String, Vec<RistrettoShare>>>,     //MPC result <type <lurl <share>>>
+    pub keys: BTreeMap<String, BTreeMap<String, Vec<RistrettoShare>>>,     //MPC result <type <lurl <share>>>
 }
 
 impl DiscloseKeys {
@@ -104,12 +104,22 @@ impl DiscloseKeys {
     }
 
     pub fn put(&mut self, typ: &str, loc: &str, share: RistrettoShare) {
-        let typs = self.keys.entry(typ.into()).or_insert_with(|| HashMap::<String, Vec<RistrettoShare>>::new());
+        let typs = self.keys.entry(typ.into()).or_insert_with(|| BTreeMap::<String, Vec<RistrettoShare>>::new());
         let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<RistrettoShare>::new());
         locs.push(share);
     }
 
-    pub fn profiles(&self) -> Vec<String> {
-        self.keys.keys().map(|k| k.clone()).collect()
+    pub fn constains_the_same(&self, profiles: &[String]) -> bool {
+        if profiles.len() != self.keys.len() {
+            return false
+        }
+
+        for item in profiles.iter() {
+            if !self.keys.contains_key(item) {
+                return false
+            }
+        }
+
+        true
     }
 }

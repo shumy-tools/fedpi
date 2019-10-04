@@ -507,6 +507,7 @@ impl Debug for MySubject {
             .field("secret", &self.secret.encode())
             .field("profile_secrets", &p_secrets)
             .field("subject", &self.subject)
+            .field("auths", &self.auths)
             .finish()
     }
 }

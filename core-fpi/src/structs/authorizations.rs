@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use serde::{Serialize, Deserialize};
+use log::error;
 
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
@@ -8,7 +9,7 @@ use crate::{Result, Scalar};
 //-----------------------------------------------------------------------------------------------------------
 // Subject Authorizations
 //-----------------------------------------------------------------------------------------------------------
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Authorizations {
     pub sid: String,
     auths: HashMap<String, HashSet<String>>       // All profile authorizations per subject <subject: <profile>>
@@ -26,6 +27,7 @@ impl Authorizations {
     pub fn authorize(&mut self, consent: &Consent) {
         if self.sid != consent.sid {
             // if it executes it's a bug in the code
+            error!("Bug detected when executing Authorizations::authorize");
             panic!("self.sid != consent.sid");
         }
 
@@ -39,6 +41,7 @@ impl Authorizations {
     pub fn revoke(&mut self, consent: &Consent) {
         if self.sid != consent.sid {
             // if it executes it's a bug in the code
+            error!("Bug detected when executing Authorizations::revoke");
             panic!("self.sid != revoke.sid");
         }
 

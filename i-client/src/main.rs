@@ -90,10 +90,9 @@ fn main() {
     let home = matches.value_of("home").unwrap_or(".");
     let home = if home.ends_with('/') { &home[..home.len()-1] } else { home };
 
-    // read configuration from HOME/config/app.config.toml file
-    let cfg = config::Config::new(&home);
-
+    // read configuration from HOME/<sid>.toml file
     let sid = matches.value_of("sid").unwrap().to_owned();
+    let cfg = config::Config::new(&home, &sid);
 
     let tx_handler = |peer: &Peer, msg: Commit| -> Result<()> {
         let msg_data = core_fpi::messages::encode(&msg).map_err(|_| Error::new(ErrorKind::Other, "Unable to encode message!"))?;

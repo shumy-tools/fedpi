@@ -1,0 +1,25 @@
+
+secret = "G8RGj2BRXkHY1NawaijfkM9hD4xh557pp7jg4W5c2om7"       # Scalar
+pkey = "GEA2sfjCAX6i13eSZwTPgy3frw5Pefga3ABeQHEiMhJx"         # CompressedRistretto  (not included in the peers)
+
+threshold = 1                                               # Number of permitted failing nodes, where #peers >= 3 * t
+log = "info"                                                # Set the log level
+
+# List of valid peers
+[peers]
+    [peers.0]
+    host = "http://localhost:26660"
+    pkey = "BGewfVeZtKH5RYDatgeBbgqorqid87zBQDcZCnFJY2HY"
+
+    [peers.1]
+    host = "http://localhost:26661"
+    pkey = "CsaBDspnmV7B281LR3GMNvZygUGg23wREWrziAbLZSWU"
+
+    [peers.2]
+    host = "http://localhost:26662"
+    pkey = "7TsL4ALD6eM4HiacqXZYxNYH2aCdU6hVSCX8RLqzPKXH"
+
+    [peers.3]
+    host = "http://localhost:26663"
+    pkey = "GoJ6vqxdTGZucaaZP268oV5pcu8BMpHiUupfwpgk68MP"
+    
