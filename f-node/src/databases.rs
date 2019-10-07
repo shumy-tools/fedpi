@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 
 use sled::{Db, IVec, TransactionError, TransactionalTree};
 use sha2::{Sha512, Digest};
-use log::error;
+use log::{error, info};
 
 use core_fpi::Result;
 use core_fpi::ids::*;
@@ -49,35 +49,44 @@ impl AppDB {
         let local_file = format!("{}/app/local.db", home);
         let global_file = format!("{}/app/global.db", home);
 
+        let local = Db::open(local_file).unwrap();
+        let global = Db::open(global_file).unwrap();
+
+        // initialize app-state cache
+        let cache = PermaCache::new();
+        let state: Option<AppState> = get(&global, STATE)
+            .map_err(|e| {
+                error!("Unable to get state: {:?}", e);
+                format!("Unable to get state: {}", e)
+            }).unwrap();
+
+        let state = state.unwrap_or_else(|| AppState { height: 0, hash: Vec::<u8>::new() });
+
+        info!("STATE - (height = {:?}, hash = {:?})", state.height, bs58::encode(&state.hash).into_string());
+        cache.set(&HASH, state.hash.clone());
+        cache.set(&STATE, state);
+
         // nothing to do here, just let it panic
-        Self {
-            cache: PermaCache::new(),
-            local: Db::open(local_file).unwrap(),
-            global: Db::open(global_file).unwrap()
-        }
+        Self { cache, local, global }
     }
 
-    pub fn get_hash(&self) -> Result<Vec<u8>> {
-        let hash: Option<IVec> = self.global.get(HASH).map_err(|e| format!("Unable to get app hash: {}", e))?;
-        match hash {
-            None => Ok(Vec::<u8>::new()),
-            Some(hash) => Ok(hash.to_vec())
-        }
+    // hash and state functions cannot recover from errors.
+    pub fn get_hash(&self) -> Vec<u8> {
+        self.cache.get(&HASH).unwrap().unwrap()
     }
 
-    pub fn set_state(&self, state: AppState) -> Result<()> {
-        let data = encode(&state)?;
-        self.global.insert(STATE, data).map_err(|e| format!("Unable to save state: {}", e))?;
-        self.global.flush().map_err(|e| format!("Unable to flush state: {}", e))?;
-        Ok(())
+    // hash and state functions cannot recover from errors.
+    pub fn set_state(&self, state: AppState) {
+        let data = encode(&state).unwrap();
+        self.global.insert(STATE, data).map_err(|e| format!("Unable to save state: {}", e)).unwrap();
+        self.global.flush().map_err(|e| format!("Unable to flush state: {}", e)).unwrap();
+        
+        self.cache.set(&STATE, state);
     }
 
-    pub fn get_state(&self) -> Result<AppState> {
-        let state: Option<AppState> = get(&self.global, STATE)?;
-        match state {
-            None => Ok(AppState { height: 0, hash: Vec::<u8>::new() }),
-            Some(state) => Ok(state)
-        }
+    // hash and state functions cannot recover from errors.
+    pub fn get_state(&self) -> AppState {
+        self.cache.get(&STATE).unwrap().unwrap()
     }
 
     pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
@@ -90,10 +99,10 @@ impl AppDB {
 
         let current: Option<Subject> = get(&self.global, &sid)?;
         match current {
-            None => set(&self.global, &sid, subject),
+            None => set(&self.global, &self.cache, &sid, subject),
             Some(mut current) => {
                 current.merge(subject);
-                set(&self.global, &sid, current)
+                set(&self.global, &self.cache, &sid, current)
             }
         }
     }
@@ -118,7 +127,7 @@ impl AppDB {
             ConsentType::Revoke => auths.revoke(&consent)
         }
         
-        tx(&self.global, |tx| {
+        tx(&self.global, &self.cache, |tx| {
             tx.set(&cid, consent)?;
             tx.set(&aid, auths)
         })
@@ -131,7 +140,7 @@ impl AppDB {
 
     pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
         let vid = vid(&vote.kid, vote.sig.id());
-        set(&self.local, &vid, vote)
+        set(&self.local, &self.cache, &vid, vote)
     }
 
     pub fn get_key(&self, kid: &str) -> Result<Option<MasterKeyPair>> {
@@ -168,8 +177,8 @@ impl AppDB {
         let eid = eid(&evidence.kid, evidence.sig.id());
         let kid = pid(&pair.kid);
 
-        set(&self.global, &eid, evidence)?;
-        set(&self.local, &kid, pair)
+        set(&self.global, &self.cache, &eid, evidence)?;
+        set(&self.local, &self.cache, &kid, pair)
     }
 }
 
@@ -223,23 +232,25 @@ fn get<T: DeserializeOwned>(db: &Db, id: &str) -> Result<Option<T>> {
     }
 }
 
-fn set<T: Serialize>(db: &Db, id: &str, obj: T) -> Result<()> {
-    tx(db, |tx| { tx.set(id, obj) })
+fn set<T: Serialize>(db: &Db, cache: &PermaCache, id: &str, obj: T) -> Result<()> {
+    tx(db, cache, |tx| { tx.set(id, obj) })
 }
 
-fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
-    //let state: Option<AppState> = get(db, HASH)?;
-
+fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, cache: &PermaCache, commit: T) -> Result<()> {
     // BIG fucking hack so I can call the closure!!!
     let commit = Rc::new(RefCell::new(Some(commit)));
     db.transaction(move |db| {
         let call = commit.borrow_mut().take().unwrap();
 
-        // get app-state
-        let mut state: Option<IVec> = db.get(HASH)?;
+        // get current app-state from cache
+        let hash: Option<Vec<u8>> = cache.get(&HASH).map_err(|e| {
+            error!("tx-abort: {}", e);
+            TransactionError::Abort
+        })?;
+
         let mut hasher = Sha512::new();
-        if let Some(state) = state.take() {
-            hasher.input(&state);
+        if let Some(hash) = &hash {
+            hasher.input(hash);
         }
 
         // execute transactions and chain state
@@ -249,46 +260,13 @@ fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
             TransactionError::Abort
         })?;
 
-        // update app-state
-        let hash = db_tx.hash();
-        db.insert(HASH, hash)?;
-        
+        // update cached app-state
+        cache.set(&HASH, db_tx.hash());
+
         Ok(())
     }).map_err(|e| format!("Unable to save structure: {}", e))?;
-
-    /*db.transaction(move |tx| {
-        let call = commit.borrow_mut().take().unwrap();
-
-        // get app-state ---------------------------------
-        let mut height = 0i64;
-        let mut hasher = Sha512::new();
-        if let Some(state) = &state {
-            height = state.height;
-            hasher.input(&state.hash);
-        }
-        // get app-state ---------------------------------
-
-        // execute transactions and chain state
-        let db_tx = DbTx::new(tx, hasher);
-        call(&db_tx).map_err(|e| {
-            error!("tx-abort: {}", e);
-            TransactionError::Abort
-        })?;
-
-        // update app-state ---------------------------------
-        let state = AppState { height: height + 1, hash: db_tx.hash() };
-        let state_data = encode(&state).map_err(|e| {
-            error!("tx-abort: {}", e);
-            TransactionError::Abort
-        })?;
-
-        tx.insert(STATE, state_data)?;
-        // update app-state ---------------------------------
-        
-        Ok(())
-    }).map_err(|e| format!("Unable to save structure: {}", e))?;*/
-
     db.flush().map_err(|e| format!("Unable to flush: {}", e))?;
+    
     Ok(())
 }
 

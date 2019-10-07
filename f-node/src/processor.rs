@@ -120,16 +120,16 @@ impl Processor {
         }
     }
 
-    pub fn app_hash(&self) -> Result<Vec<u8>> {
+    pub fn app_hash(&self) -> Vec<u8> {
         self.db.get_hash()
     }
 
-    pub fn update_app_state(&self, height: i64, hash: Vec<u8>) -> Result<()> {
+    pub fn update_app_state(&self, height: i64, hash: Vec<u8>) {
         let state = AppState { height, hash };
         self.db.set_state(state)
     }
 
-    pub fn app_state(&self) -> Result<AppState> {
+    pub fn app_state(&self) -> AppState {
         self.db.get_state()
     }
 }
