@@ -4,7 +4,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde::de::DeserializeOwned;
 
 use sled::{Db, IVec, TransactionError, TransactionalTree};
@@ -20,18 +20,20 @@ use core_fpi::messages::{encode, decode};
 //--------------------------------------------------------------------
 // Reserved keys
 //--------------------------------------------------------------------
+pub const HASH: &str = "hash";
 pub const STATE: &str = "state";
 pub const MASTER: &str = "master";
 
 //--------------------------------------------------------------------
 // Rules to derive keys. Always use a prefix to avoid security issues, such as data override from different protocols!
 //--------------------------------------------------------------------
-fn aid(sid: &str) -> String { format!("aid-{}", sid) }                              // authorizations-id
-fn cid(sid: &str, target: &str) -> String { format!("cid-{}-{}", sid, target) }     // consent-id
-fn eid(session: &str, kid: &str) -> String { format!("eid-{}-{}", kid, session) }   // master-key-id (evidence)
-fn pid(kid: &str) -> String { format!("pid-{}", kid) }                              // master-key-pair-id
 fn sid(sid: &str) -> String { format!("sid-{}", sid) }                              // subject-id
-fn vid(session: &str, kid: &str) -> String { format!("vid-{}-{}", kid, session) }   // master-key-vote-id
+fn aid(sid: &str) -> String { format!("aid-{}", sid) }                              // authorizations-id
+fn pid(kid: &str) -> String { format!("pid-{}", kid) }                              // master-key-pair-id
+
+fn cid(sid: &str, sig: &str) -> String { format!("cid-{}-{}", sid, sig) }           // consent-id
+fn vid(kid: &str, sig: &str) -> String { format!("vid-{}-{}", kid, sig) }           // master-key-vote-id
+fn eid(kid: &str, sig: &str) -> String { format!("eid-{}-{}", kid, sig) }           // master-key-id (evidence)
 
 //--------------------------------------------------------------------
 // AppDB where the application data results are stored 
@@ -55,11 +57,26 @@ impl AppDB {
         }
     }
 
-    pub fn get_state(&self) -> Result<Vec<u8>> {
-        let state: Option<IVec> = self.global.get(STATE).map_err(|e| format!("Unable to get app state: {}", e))?;
+    pub fn get_hash(&self) -> Result<Vec<u8>> {
+        let hash: Option<IVec> = self.global.get(HASH).map_err(|e| format!("Unable to get app hash: {}", e))?;
+        match hash {
+            None => Ok(Vec::<u8>::new()),
+            Some(hash) => Ok(hash.to_vec())
+        }
+    }
+
+    pub fn set_state(&self, state: AppState) -> Result<()> {
+        let data = encode(&state)?;
+        self.global.insert(STATE, data).map_err(|e| format!("Unable to save state: {}", e))?;
+        self.global.flush().map_err(|e| format!("Unable to flush state: {}", e))?;
+        Ok(())
+    }
+
+    pub fn get_state(&self) -> Result<AppState> {
+        let state: Option<AppState> = get(&self.global, STATE)?;
         match state {
-            None => return Err("No app state available!".into()),
-            Some(state) => Ok(state.to_vec())
+            None => Ok(AppState { height: 0, hash: Vec::<u8>::new() }),
+            Some(state) => Ok(state)
         }
     }
 
@@ -92,7 +109,7 @@ impl AppDB {
     }
 
     pub fn save_authorization(&self, consent: Consent) -> Result<()> {
-        let cid = cid(&consent.sid, &consent.target);
+        let cid = cid(&consent.sid, consent.sig.id());
         let aid = aid(&consent.sid);
 
         let mut auths = self.get_authorizations(&consent.sid)?;
@@ -107,18 +124,18 @@ impl AppDB {
         })
     }
 
-    pub fn get_vote(&self, session: &str, kid: &str) -> Result<Option<MasterKeyVote>> {
-        let vid = vid(session, kid);
+    pub fn get_vote(&self, kid: &str, sig: &str) -> Result<Option<MasterKeyVote>> {
+        let vid = vid(kid, sig);
         get(&self.local, &vid)
     }
 
     pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
-        let vid = vid(&vote.session, &vote.kid);
+        let vid = vid(&vote.kid, vote.sig.id());
         set(&self.local, &vid, vote)
     }
 
     pub fn get_key(&self, kid: &str) -> Result<Option<MasterKeyPair>> {
-        let kid = pid(&kid);
+        let kid = pid(kid);
 
         let cached = self.cache.get(&kid)?;
         if cached.is_some() {
@@ -135,8 +152,8 @@ impl AppDB {
         }
     }
 
-    pub fn get_key_evidence(&self, session: &str, kid: &str) -> Result<Option<MasterKey>> {
-        let eid = eid(&session, &kid);
+    pub fn get_key_evidence(&self, kid: &str, sig: &str) -> Result<Option<MasterKey>> {
+        let eid = eid(kid, sig);
         get(&self.global, &eid)
     }
 
@@ -148,7 +165,7 @@ impl AppDB {
         }
 
         // evidence keeps history for key
-        let eid = eid(&evidence.session, &evidence.kid);
+        let eid = eid(&evidence.kid, evidence.sig.id());
         let kid = pid(&pair.kid);
 
         set(&self.global, &eid, evidence)?;
@@ -162,6 +179,12 @@ impl AppDB {
 //--------------------------------------------------------------------
 // Generic database functions and structures
 //--------------------------------------------------------------------
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AppState {
+    pub height: i64,
+    pub hash: Vec<u8>
+}
+
 pub struct DbTx<'a> {
     pub tree: &'a TransactionalTree,
     pub state: RefCell<Sha512>
@@ -183,7 +206,7 @@ impl<'a> DbTx<'a> {
         Ok(())
     }
 
-    pub fn state(self) -> Vec<u8> {
+    pub fn hash(self) -> Vec<u8> {
         let value = self.state.into_inner();
         value.result().to_vec()
     }
@@ -205,13 +228,15 @@ fn set<T: Serialize>(db: &Db, id: &str, obj: T) -> Result<()> {
 }
 
 fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
+    //let state: Option<AppState> = get(db, HASH)?;
+
     // BIG fucking hack so I can call the closure!!!
     let commit = Rc::new(RefCell::new(Some(commit)));
     db.transaction(move |db| {
         let call = commit.borrow_mut().take().unwrap();
 
         // get app-state
-        let mut state: Option<IVec> = db.get(STATE)?;
+        let mut state: Option<IVec> = db.get(HASH)?;
         let mut hasher = Sha512::new();
         if let Some(state) = state.take() {
             hasher.input(&state);
@@ -225,11 +250,43 @@ fn tx<T: FnOnce(&DbTx) -> Result<()>>(db: &Db, commit: T) -> Result<()> {
         })?;
 
         // update app-state
-        let state = db_tx.state();
-        db.insert(STATE, state)?;
+        let hash = db_tx.hash();
+        db.insert(HASH, hash)?;
         
         Ok(())
     }).map_err(|e| format!("Unable to save structure: {}", e))?;
+
+    /*db.transaction(move |tx| {
+        let call = commit.borrow_mut().take().unwrap();
+
+        // get app-state ---------------------------------
+        let mut height = 0i64;
+        let mut hasher = Sha512::new();
+        if let Some(state) = &state {
+            height = state.height;
+            hasher.input(&state.hash);
+        }
+        // get app-state ---------------------------------
+
+        // execute transactions and chain state
+        let db_tx = DbTx::new(tx, hasher);
+        call(&db_tx).map_err(|e| {
+            error!("tx-abort: {}", e);
+            TransactionError::Abort
+        })?;
+
+        // update app-state ---------------------------------
+        let state = AppState { height: height + 1, hash: db_tx.hash() };
+        let state_data = encode(&state).map_err(|e| {
+            error!("tx-abort: {}", e);
+            TransactionError::Abort
+        })?;
+
+        tx.insert(STATE, state_data)?;
+        // update app-state ---------------------------------
+        
+        Ok(())
+    }).map_err(|e| format!("Unable to save structure: {}", e))?;*/
 
     db.flush().map_err(|e| format!("Unable to flush: {}", e))?;
     Ok(())

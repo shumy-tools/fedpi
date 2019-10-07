@@ -11,32 +11,29 @@ use serde::{Serialize, Deserialize};
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterKeyRequest {
-    pub session: String,
     pub kid: String,
     pub sig: ExtSignature
 }
 
 impl MasterKeyRequest {
-    pub fn sign(session: &str, kid: &str, admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
-        let data = Self::data(session, kid);
+    pub fn sign(kid: &str, admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
+        let data = Self::data(kid);
         Self {
-            session: session.into(),
             kid: kid.into(),
             sig: ExtSignature::sign(admin_secret, admin_key, &data)
         }
     }
 
     pub fn verify(&self) -> bool {
-        let data = Self::data(&self.session, &self.kid);
+        let data = Self::data(&self.kid);
         self.sig.verify(&data)
     }
 
-    fn data(session: &str, kid: &str) -> [Vec<u8>; 2] {
+    fn data(kid: &str) -> [Vec<u8>; 1] {
         // These unwrap() should never fail, or it's a serious code bug!
-        let b_session = bincode::serialize(session).unwrap();
         let b_kid = bincode::serialize(kid).unwrap();
         
-        [b_session, b_kid]
+        [b_kid]
     }
 }
 
@@ -152,6 +149,7 @@ pub struct MasterKey {
     pub kid: String,
     pub matrix: PublicMatrix,
     pub votes: Vec<MasterKeyCompressedVote>,
+    
     pub sig: ExtSignature,       //signature from admin
     #[serde(skip)] _phantom: () // force use of constructor
 }

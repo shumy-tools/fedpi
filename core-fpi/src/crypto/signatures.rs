@@ -6,14 +6,23 @@ use serde::de::{Deserializer, Error};
 
 use sha2::{Sha512, Digest};
 
+use chrono::Utc;
+
 use crate::{G, Scalar, RistrettoPoint, KeyEncoder};
 
 //-----------------------------------------------------------------------------------------------------------
 // Schnorr's signature
 //-----------------------------------------------------------------------------------------------------------
+#[derive(Serialize, Deserialize)]
+struct SerializedSignature {
+    pub sig: String,
+    pub timestamp: i64,
+}
+
 #[derive(Clone)]
 pub struct Signature {
     pub encoded: String,
+    pub timestamp: i64,
 
     pub c: Scalar,
     pub p: Scalar
@@ -27,14 +36,16 @@ impl Debug for Signature {
 
 impl Serialize for Signature {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        self.encoded.serialize(serializer)
+        let ss = SerializedSignature { sig: self.encoded.clone(), timestamp: self.timestamp };
+        ss.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for Signature {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        let as_string = String::deserialize(deserializer)?;
-        let data = bs58::decode(&as_string).into_vec()
+        let ss = SerializedSignature::deserialize(deserializer)?;
+
+        let data = bs58::decode(&ss.sig).into_vec()
             .map_err(|_| Error::custom("Invalid base58 signature string!"))?;
         
         if data.len() != 64 {
@@ -53,7 +64,7 @@ impl<'de> Deserialize<'de> for Signature {
         let p_scalar = Scalar::from_canonical_bytes(p_bytes)
             .ok_or_else(|| Error::custom("Invalid p scalar!"))?;
 
-        let obj = Signature { encoded: as_string, c: c_scalar, p: p_scalar };
+        let obj = Signature { encoded: ss.sig, timestamp: ss.timestamp, c: c_scalar, p: p_scalar };
         Ok(obj)
     }
 }
@@ -61,6 +72,8 @@ impl<'de> Deserialize<'de> for Signature {
 impl Signature {
     #[allow(non_snake_case)]
     pub fn sign(s: &Scalar, P: &RistrettoPoint, BasePoint: &RistrettoPoint, data: &[Vec<u8>]) -> Self {
+        let timestamp = Utc::now().timestamp();
+
         let mut hasher = Sha512::new()
             .chain(s.as_bytes());
         
@@ -73,7 +86,8 @@ impl Signature {
 
         let mut hasher = Sha512::new()
             .chain(P.compress().as_bytes())
-            .chain(M.as_bytes());
+            .chain(M.as_bytes())
+            .chain(timestamp.to_le_bytes());
         
         for d in data {
             hasher.input(d);
@@ -86,7 +100,7 @@ impl Signature {
         let data = data.concat();
         let as_string = bs58::encode(&data).into_string();
 
-        Self { encoded: as_string, c, p: m - c * s }
+        Self { encoded: as_string, timestamp, c, p: m - c * s }
     }
 
     #[allow(non_snake_case)]
@@ -95,7 +109,8 @@ impl Signature {
 
         let mut hasher = Sha512::new()
             .chain(P.compress().as_bytes())
-            .chain(M.compress().as_bytes());
+            .chain(M.compress().as_bytes())
+            .chain(self.timestamp.to_le_bytes());
         
         for d in data {
             hasher.input(d);
@@ -126,6 +141,10 @@ impl Debug for ExtSignature {
 }
 
 impl ExtSignature {
+    pub fn id(&self) -> &str {
+        &self.sig.encoded
+    }
+
     #[allow(non_snake_case)]
     pub fn sign(s: &Scalar, key: RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, &key, &G, data);
@@ -148,6 +167,10 @@ pub struct IndSignature {
 }
 
 impl IndSignature {
+    pub fn id(&self) -> &str {
+        &self.sig.encoded
+    }
+
     pub fn sign(index: usize, s: &Scalar, key: &RistrettoPoint, data: &[Vec<u8>]) -> Self {
         let sig = Signature::sign(s, key, &G, data);
         Self { index, sig }

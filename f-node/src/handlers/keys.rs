@@ -22,9 +22,9 @@ impl MasterKeyHandler {
     }
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
-        info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.session, req.kid);
+        info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
 
-        if self.db.get_key_evidence(&req.session, &req.kid)?.is_some() {
+        if self.db.get_key_evidence(&req.kid, req.sig.id())?.is_some() {
             return Err("This session/key-id pair already exists!".into())
         }
 
@@ -33,17 +33,17 @@ impl MasterKeyHandler {
             return Err("Client has not authorization to negotiate master-key!".into())
         }
 
-        if let Some(vote) = self.db.get_vote(&req.session, &req.kid)? {
+        if let Some(vote) = self.db.get_vote(&req.kid, req.sig.id())? {
             let msg = Response::Vote(Vote::VMasterKeyVote(vote.clone()));
             return encode(&msg)
         }
 
-        let e_keys = self.derive_encryption_keys(&req.session);         // encryption keys (e_i)
+        let e_keys = self.derive_encryption_keys(&req.sig.id());        // encryption keys (e_i)
         let p_keys = e_keys.0.iter().map(|e_i| e_i * G).collect();      // public keys (e_i * G -> E_i)
         let e_shares = self.derive_encrypted_shares(&e_keys);           // encrypted shares and Feldman's Coefficients (e_i + y_i -> p_i, A_k)
 
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
-        let vote = MasterKeyVote::sign(&req.session, &req.kid, &self.cfg.peers_hash, e_shares.0, p_keys, e_shares.1, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
+        let vote = MasterKeyVote::sign(&req.sig.id(), &req.kid, &self.cfg.peers_hash, e_shares.0, p_keys, e_shares.1, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
         self.db.save_vote(vote.clone())?;
 
         let msg = Response::Vote(Vote::VMasterKeyVote(vote));

@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Formatter};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Serialize, Deserialize};
 
@@ -13,7 +13,7 @@ use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 pub struct Subject {
     pub sid: String,                                            // Subject ID - <Name>
     pub keys: Vec<SubjectKey>,                                  // All subject keys
-    pub profiles: HashMap<String, Profile>,                     // All subject profiles <typ:lurl>
+    pub profiles: BTreeMap<String, Profile>,                    // All subject profiles <typ:lurl>
 
     #[serde(skip)] _phantom: () // force use of constructor
 }
@@ -92,7 +92,7 @@ impl Subject {
         active_key.check(&self.sid, active_key)?;
 
         // check profiles (it's ok if there are no profiles)
-        let empty_map = HashMap::<String, Profile>::new();
+        let empty_map = BTreeMap::<String, Profile>::new();
         Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
     }
 
@@ -131,7 +131,7 @@ impl Subject {
         Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
     }
 
-    fn check_profiles(sid: &str, profiles: &HashMap<String, Profile>, current: &HashMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
+    fn check_profiles(sid: &str, profiles: &BTreeMap<String, Profile>, current: &BTreeMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
         for (typ, item) in profiles.iter() {
             if *typ != item.typ {
                 return Err("Incorrect profile map-key!".into())
@@ -199,7 +199,7 @@ impl SubjectKey {
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Profile {
     pub typ: String,                                    // Profile Type ex: HealthCare, Financial, Assets, etc
-    pub locations: HashMap<String, ProfileLocation>,    // Location <lurl>
+    pub locations: BTreeMap<String, ProfileLocation>,    // Location <lurl>
     
     #[serde(skip)] _phantom: (), // force use of constructor
     

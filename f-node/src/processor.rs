@@ -9,7 +9,7 @@ use crate::handlers::subjects::*;
 use crate::handlers::authorizations::*;
 use crate::handlers::queries::*;
 use crate::config::Config;
-use crate::databases::AppDB;
+use crate::databases::{AppDB, AppState};
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
@@ -120,7 +120,16 @@ impl Processor {
         }
     }
 
-    pub fn state(&self) -> Result<Vec<u8>> {
+    pub fn app_hash(&self) -> Result<Vec<u8>> {
+        self.db.get_hash()
+    }
+
+    pub fn update_app_state(&self, height: i64, hash: Vec<u8>) -> Result<()> {
+        let state = AppState { height, hash };
+        self.db.set_state(state)
+    }
+
+    pub fn app_state(&self) -> Result<AppState> {
         self.db.get_state()
     }
 }

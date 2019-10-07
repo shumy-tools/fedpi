@@ -11,7 +11,7 @@ use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, uuid, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
+use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
 use core_fpi::ids::*;
 use core_fpi::authorizations::*;
 use core_fpi::disclosures::*;
@@ -332,9 +332,8 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
     }
 
     pub fn negotiate(&mut self, kid: &str) -> Result<()> {
-        let session = uuid();
         let n = self.config.peers.len();
-        let req = MasterKeyRequest::sign(&session, kid, &self.config.secret, self.config.pkey);
+        let req = MasterKeyRequest::sign(kid, &self.config.secret, self.config.pkey);
 
         // set the results in ordered fashion
         let mut votes = Vec::<MasterKeyVote>::with_capacity(n);
@@ -346,7 +345,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                         let peer = self.config.peers.get(vote.sig.index).ok_or("Unexpected peer index!")
                             .map_err(|e| Error::new(ErrorKind::Other, e))?;
                         
-                        vote.check(&session, &kid, &self.config.peers_hash, self.config.peers.len(), &peer.pkey)
+                        vote.check(&req.sig.id(), &kid, &self.config.peers_hash, self.config.peers.len(), &peer.pkey)
                             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
                         if votes.get(vote.sig.index).is_some() {
@@ -363,7 +362,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
         // If all is OK, create MasterKey to commit
         let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let mk = MasterKey::sign(&session, kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
+        let mk = MasterKey::sign(&req.sig.id(), kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
             .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
         // select a random peer

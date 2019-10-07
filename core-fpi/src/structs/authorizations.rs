@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use serde::{Serialize, Deserialize};
 
 use crate::ids::*;
@@ -10,17 +10,17 @@ use crate::{Result, Scalar};
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Authorizations {
-    auths: HashMap<String, HashSet<String>>       // All profile authorizations per subject <subject: <profile>>
+    auths: BTreeMap<String, BTreeSet<String>>       // All profile authorizations per subject <subject: <profile>>
 }
 
 impl Authorizations {
     pub fn new() -> Self {
-        Self { auths: HashMap::new() }
+        Self { auths: BTreeMap::new() }
     }
 
     pub fn authorize(&mut self, consent: &Consent) {
         let aid = consent.target.clone();
-        let consents = self.auths.entry(aid).or_insert_with(|| HashSet::<String>::new());
+        let consents = self.auths.entry(aid).or_insert_with(|| BTreeSet::<String>::new());
         for item in consent.profiles.iter() {
             consents.insert(item.clone());
         }

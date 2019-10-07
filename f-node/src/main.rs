@@ -60,5 +60,5 @@ fn main() {
 
     // init message processor (generic processor that doesn't depend on tendermint)
     let prc = processor::Processor::new(cfg);
-    abci::run(addr, tendermint::NodeApp { processor: prc });
+    abci::run(addr, tendermint::NodeApp { height: 0, processor: prc });
 }
