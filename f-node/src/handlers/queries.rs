@@ -3,30 +3,35 @@ use log::info;
 
 use core_fpi::Result;
 use core_fpi::disclosures::*;
+use core_fpi::authorizations::*;
 use core_fpi::messages::*;
+use core_fpi::ids::*;
 
 use crate::config::Config;
-use crate::databases::{MASTER, AppDB};
+use crate::db::*;
 
 pub struct QueryHandler {
     cfg: Arc<Config>,
-    db: Arc<AppDB>
+    store: Arc<AppDB>
 }
 
 impl QueryHandler {
-    pub fn new(cfg: Arc<Config>, db: Arc<AppDB>) -> Self {
-        Self { cfg, db }
+    pub fn new(cfg: Arc<Config>, store: Arc<AppDB>) -> Self {
+        Self { cfg, store }
     }
 
     pub fn request(&mut self, disclose: DiscloseRequest) -> Result<Vec<u8>> {
         info!("REQUEST-DISCLOSE - (sid = {:?}, target = {:?}, #profiles = {:?})", disclose.sid, disclose.target, disclose.profiles.len());
+        let dsid = sid(&disclose.sid);
+        let tsid = sid(&disclose.target);
+        let aid = aid(&disclose.target);
 
-        let subject = self.db.get_subject(&disclose.sid)?.ok_or("Subject not found!")?;
+        let subject: Subject = self.store.get(&dsid).ok_or("Subject not found!")?;
         disclose.check(&subject)?;
 
-        let mkey = self.db.get_key(MASTER)?.ok_or("Master-key unavailable!")?;
-        let target = self.db.get_subject(&disclose.target)?.ok_or("Target not found!")?;
-        let auths = self.db.get_authorizations(&disclose.target)?;
+        let mkey = self.store.key(MASTER).ok_or("Master-key unavailable!")?;
+        let target: Subject = self.store.get(&tsid).ok_or("Target not found!")?;
+        let auths: Authorizations = self.store.get(&aid).ok_or("No authorizations found for target!")?;
 
         // verify if the client has authorization to disclose profiles
         let mut dkeys = DiscloseKeys::new();

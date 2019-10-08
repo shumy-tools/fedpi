@@ -56,7 +56,7 @@ impl abci::Application for NodeApp {
             }
         };
 
-        if let Err(err) = self.processor.check(&msg) {
+        if let Err(err) = self.processor.filter(&msg) {
             error!("CheckTx-Error: {:?}", err);
             resp.set_code(1);
             resp.set_log(err.into());
@@ -79,7 +79,7 @@ impl abci::Application for NodeApp {
             }
         };
 
-        if let Err(err) = self.processor.commit(&msg) {
+        if let Err(err) = self.processor.deliver(&msg) {
             // The tx should have been rejected by the mempool, but may have been included in a block by a Byzantine proposer!
             error!("DeliverTx-Error: {:?}", err);
             resp.set_code(1);
@@ -89,20 +89,21 @@ impl abci::Application for NodeApp {
         resp
     }
 
+    fn begin_block(&mut self, _req: &RequestBeginBlock) -> ResponseBeginBlock {
+        self.processor.start();
+        ResponseBeginBlock::new()
+    }
+
     fn end_block(&mut self, req: &RequestEndBlock) -> ResponseEndBlock {
         self.height = req.height;
         ResponseEndBlock::new()
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
+        let state = self.processor.commit(self.height);
+        
         let mut resp = ResponseCommit::new();
-        
-        let hash = self.processor.app_hash();
-        info!("UPDATE-STATE - (height = {:?}, hash = {:?})", self.height, bs58::encode(&hash).into_string());
-
-        self.processor.update_app_state(self.height, hash.clone());
-        
-        resp.set_data(hash);
+        resp.set_data(state.hash);
         resp
     }
 
@@ -111,7 +112,7 @@ impl abci::Application for NodeApp {
         resp.set_data("FedPI Node".into());
         resp.set_version(VERSION.into());
 
-        let state = self.processor.app_state();
+        let state = self.processor.state();
         info!("INFO - (ver = {:?}, height = {:?}, hash = {:?})", VERSION, state.height, bs58::encode(&state.hash).into_string());
         
         resp.set_last_block_height(state.height);

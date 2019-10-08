@@ -8,8 +8,8 @@ use env_logger::fmt::Color;
 use log::info;
 use log::Level::{Info, Warn, Error};
 
+mod db;
 mod config;
-mod databases;
 mod handlers;
 mod processor;
 mod tendermint;

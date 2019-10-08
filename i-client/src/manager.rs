@@ -333,7 +333,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
 
     pub fn negotiate(&mut self, kid: &str) -> Result<()> {
         let n = self.config.peers.len();
-        let req = MasterKeyRequest::sign(kid, &self.config.secret, self.config.pkey);
+        let req = MasterKeyRequest::sign(kid, &self.config.peers_hash, &self.config.secret, self.config.pkey);
 
         // set the results in ordered fashion
         let mut votes = Vec::<MasterKeyVote>::with_capacity(n);

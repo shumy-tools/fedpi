@@ -12,28 +12,31 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterKeyRequest {
     pub kid: String,
+    pub peers: Vec<u8>,
     pub sig: ExtSignature
 }
 
 impl MasterKeyRequest {
-    pub fn sign(kid: &str, admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
-        let data = Self::data(kid);
+    pub fn sign(kid: &str, peers: &[u8], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
+        let data = Self::data(kid, peers);
         Self {
             kid: kid.into(),
+            peers: peers.to_vec(),
             sig: ExtSignature::sign(admin_secret, admin_key, &data)
         }
     }
 
     pub fn verify(&self) -> bool {
-        let data = Self::data(&self.kid);
+        let data = Self::data(&self.kid, &self.peers);
         self.sig.verify(&data)
     }
 
-    fn data(kid: &str) -> [Vec<u8>; 1] {
+    fn data(kid: &str, peers: &[u8]) -> [Vec<u8>; 2] {
         // These unwrap() should never fail, or it's a serious code bug!
         let b_kid = bincode::serialize(kid).unwrap();
+        let b_peers = bincode::serialize(peers).unwrap();
         
-        [b_kid]
+        [b_kid, b_peers]
     }
 }
 

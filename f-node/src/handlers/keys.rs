@@ -3,39 +3,39 @@ use log::info;
 use sha2::{Sha512, Digest};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{rnd_scalar, G, Result, Scalar, RistrettoPoint};
+use core_fpi::{rnd_scalar, G, Result, Scalar};
 use core_fpi::shares::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
 
 use crate::config::Config;
-use crate::databases::AppDB;
+use crate::db::*;
 
 pub struct MasterKeyHandler {
     cfg: Arc<Config>,
-    db: Arc<AppDB>
+    store: Arc<AppDB>
 }
 
 impl MasterKeyHandler {
-    pub fn new(cfg: Arc<Config>, db: Arc<AppDB>) -> Self {
-        Self { cfg, db }
+    pub fn new(cfg: Arc<Config>, store: Arc<AppDB>) -> Self {
+        Self { cfg, store }
     }
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
+        let eid = eid(&req.kid, req.sig.id());
 
-        if self.db.get_key_evidence(&req.kid, req.sig.id())?.is_some() {
-            return Err("This session/key-id pair already exists!".into())
+        if self.store.contains(&eid) {
+            return Err("Master-key evidence already exists!".into())
+        }
+
+        if self.cfg.peers_hash != req.peers {
+            return Err("Incorrect peers-hash!".into())
         }
 
         // verify if the client has authorization to fire negotiation
         if req.sig.key != self.cfg.admin || !req.verify() {
             return Err("Client has not authorization to negotiate master-key!".into())
-        }
-
-        if let Some(vote) = self.db.get_vote(&req.kid, req.sig.id())? {
-            let msg = Response::Vote(Vote::VMasterKeyVote(vote.clone()));
-            return encode(&msg)
         }
 
         let e_keys = self.derive_encryption_keys(&req.sig.id());        // encryption keys (e_i)
@@ -44,73 +44,83 @@ impl MasterKeyHandler {
 
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
         let vote = MasterKeyVote::sign(&req.sig.id(), &req.kid, &self.cfg.peers_hash, e_shares.0, p_keys, e_shares.1, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
-        self.db.save_vote(vote.clone())?;
-
         let msg = Response::Vote(Vote::VMasterKeyVote(vote));
         encode(&msg)
     }
 
-    pub fn check(&self, evidence: &MasterKey) -> Result<()> {
-        info!("CHECK-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
+    pub fn filter(&self, evidence: &MasterKey) -> Result<()> {
+        info!("FILTER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
 
         // verify if the client has authorization to commit evidence (signature is verified on check)
-        if evidence.sig.key != self.cfg.admin {
+        /*if evidence.sig.key != self.cfg.admin {
             return Err("Client has not authorization to commit master-key evidence!".into())
         }
 
         let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
-        evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys)
+        evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys)*/
+
+        //TODO: should only verify signatures
+        Ok(())
     }
 
-    pub fn commit(&mut self, evidence: MasterKey) -> Result<()> {
-        //self.check(&mkey)?;
-        info!("COMMIT-KEY - (session = {:?})", evidence.session);
+    pub fn deliver(&mut self, evidence: MasterKey) -> Result<()> {
+        info!("DELIVER-KEY - (session = {:?})", evidence.session);
+        let eid = eid(&evidence.kid, evidence.sig.id());
+        let pid = pid(&evidence.kid);
+
+        // ---------------transaction---------------
+        let tx = self.store.tx();
+
+            // avoid evidence override
+            if tx.contains(&eid) {
+                return Err("Master-key evidence already exists!".into())
+            }
         
-        let n = self.cfg.peers.len();
+            let n = self.cfg.peers.len();
+            let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)
+            let e_keys = self.derive_encryption_keys(&evidence.session);        // encryption keys (e_i)
 
-        let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)
-        let e_keys = self.derive_encryption_keys(&evidence.session);        // encryption keys (e_i)
-
-        if e_shares.0.len() != n || e_keys.0.len() != n {
-            return Err("Incorrect sizes on MasterKey commit (#e_shares != n || #e_keys != n)!".into())
-        }
-
-        // recover an check encrypted shares
-        let share_index = e_shares.0[0].i;
-        let mut shares = Vec::<Share>::with_capacity(n);
-        for (i, e_i) in e_keys.0.iter().enumerate() {
-            if e_shares.0[i].i != share_index {
-                return Err("Invalid share index!".into())
+            if e_shares.0.len() != n || e_keys.0.len() != n {
+                return Err("Incorrect sizes on MasterKey commit (#e_shares != n || #e_keys != n)!".into())
             }
 
-            let share = &e_shares.0[i] - e_i;
-            let r_share = &share * &G;
+            // recover an check encrypted shares
+            let share_index = e_shares.0[0].i;
+            let mut shares = Vec::<Share>::with_capacity(n);
+            for (i, e_i) in e_keys.0.iter().enumerate() {
+                if e_shares.0[i].i != share_index {
+                    return Err("Invalid share index!".into())
+                }
 
-            if !e_shares.1[i].verify(&r_share) {
-                return Err("Invalid recovered share!".into())
+                let share = &e_shares.0[i] - e_i;
+                let r_share = &share * &G;
+
+                if !e_shares.1[i].verify(&r_share) {
+                    return Err("Invalid recovered share!".into())
+                }
+
+                shares.push(share);
             }
 
-            shares.push(share);
-        }
+            // recovered the key-pair for this peer
+            let y_secret = shares.iter().fold(Scalar::zero(), |total, share| total +  share.yi);
+            let y_public = e_shares.2;
 
-        // recovered the key-pair for this peer
-        let y_secret = shares.iter().fold(Scalar::zero(), |total, share| total +  share.yi);
-        let y_public = e_shares.2;
+            //info!("KEY-PAIR (yi*G = {:?}, Y = {:?})", (y_secret * G).encode(), y_public.encode());
+            let pair = MasterKeyPair {
+                kid: evidence.kid.clone(),
+                share: Share { i: share_index, yi: y_secret },
+                public: y_public
+            };
 
-        //info!("KEY-PAIR (yi*G = {:?}, Y = {:?})", (y_secret * G).encode(), y_public.encode());
-        let pair = MasterKeyPair {
-            kid: evidence.kid.clone(),
-            share: Share { i: share_index, yi: y_secret },
-            public: y_public
-        };
+            tx.set(&eid, evidence);
+            tx.set_local(&pid, pair);
 
-        self.db.save_key(evidence, pair)?;
-
-        /* TODO: how to to evolve all existing pseudonyms?
-            * This is an issue, because the pseudonyms are not in the federated network!
-            * Contact each p-server to update (delivering the evolution-key)?
-            * Or, mantain the respective master-key (base-point) for each Profile?
-        */
+            /* TODO: how to to evolve all existing pseudonyms?
+                * This is an issue, because the pseudonyms are not in the federated network!
+                * Contact each p-server to update (delivering the evolution-key)?
+                * Or, mantain the respective master-key (base-point) for each Profile?
+            */
         
         Ok(())
     }

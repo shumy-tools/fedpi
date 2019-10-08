@@ -20,8 +20,8 @@ use core_fpi::messages::{encode, decode};
 //--------------------------------------------------------------------
 // Reserved keys
 //--------------------------------------------------------------------
-pub const HASH: &str = "hash";
-pub const STATE: &str = "state";
+pub const HASH: &str = "$hash";
+pub const STATE: &str = "$state";
 pub const MASTER: &str = "master";
 
 //--------------------------------------------------------------------
@@ -49,6 +49,7 @@ impl AppDB {
         let local_file = format!("{}/app/local.db", home);
         let global_file = format!("{}/app/global.db", home);
 
+        // nothing to do here, just let it panic
         let local = Db::open(local_file).unwrap();
         let global = Db::open(global_file).unwrap();
 
@@ -58,7 +59,7 @@ impl AppDB {
             .map_err(|e| {
                 error!("Unable to get state: {:?}", e);
                 format!("Unable to get state: {}", e)
-            }).unwrap();
+            }).unwrap(); // nothing to do here, just let it panic
 
         let state = state.unwrap_or_else(|| AppState { height: 0, hash: Vec::<u8>::new() });
 
@@ -66,7 +67,6 @@ impl AppDB {
         cache.set(&HASH, state.hash.clone());
         cache.set(&STATE, state);
 
-        // nothing to do here, just let it panic
         Self { cache, local, global }
     }
 
@@ -89,6 +89,8 @@ impl AppDB {
         self.cache.get(&STATE).unwrap().unwrap()
     }
 
+
+
     pub fn get_subject(&self, id: &str) -> Result<Option<Subject>> {
         let sid = sid(id);
         get(&self.global, &sid)
@@ -96,6 +98,11 @@ impl AppDB {
 
     pub fn save_subject(&self, subject: Subject) -> Result<()> {
         let sid = sid(&subject.sid);
+
+        //TODO: how to avoid subject update override
+        /*if contains(&self.global, &cid)? {
+            return Err("Consent already exists!".into())
+        }*/
 
         let current: Option<Subject> = get(&self.global, &sid)?;
         match current {
@@ -121,6 +128,11 @@ impl AppDB {
         let cid = cid(&consent.sid, consent.sig.id());
         let aid = aid(&consent.sid);
 
+        // avoid consent override
+        if contains(&self.global, &cid)? {
+            return Err("Consent already exists!".into())
+        }
+
         let mut auths = self.get_authorizations(&consent.sid)?;
         match consent.typ {
             ConsentType::Consent => auths.authorize(&consent),
@@ -140,6 +152,12 @@ impl AppDB {
 
     pub fn save_vote(&self, vote: MasterKeyVote) -> Result<()> {
         let vid = vid(&vote.kid, vote.sig.id());
+
+        // avoid vote override
+        if contains(&self.global, &vid)? {
+            return Err("Vote already exists!".into())
+        }
+
         set(&self.local, &self.cache, &vid, vote)
     }
 
@@ -176,6 +194,11 @@ impl AppDB {
         // evidence keeps history for key
         let eid = eid(&evidence.kid, evidence.sig.id());
         let kid = pid(&pair.kid);
+
+        // avoid evidence override
+        if contains(&self.global, &eid)? {
+            return Err("Master-key evidence already exists!".into())
+        }
 
         set(&self.global, &self.cache, &eid, evidence)?;
         set(&self.local, &self.cache, &kid, pair)
@@ -219,6 +242,10 @@ impl<'a> DbTx<'a> {
         let value = self.state.into_inner();
         value.result().to_vec()
     }
+}
+
+fn contains(db: &Db, id: &str) -> Result<bool> {
+    db.contains_key(id).map_err(|e| format!("Unable to verify if key exists: {}", e))
 }
 
 fn get<T: DeserializeOwned>(db: &Db, id: &str) -> Result<Option<T>> {

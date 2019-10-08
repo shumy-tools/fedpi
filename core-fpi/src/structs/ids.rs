@@ -65,7 +65,7 @@ impl Subject {
         }
     }
 
-    pub fn check(&self, current: Option<Subject>) -> Result<()> {
+    pub fn check(&self, current: &Option<Subject>) -> Result<()> {
         match current {
             None => self.check_create(),
             Some(ref current) => {
@@ -436,14 +436,14 @@ mod tests {
             .push(p1)
             .push(p2)
             .keys.push(skey1.clone());
-        assert!(new1.check(None) == Ok(()));
+        assert!(new1.check(&None) == Ok(()));
 
         //--------------------------------------------------
         // Evolving SubjectKey
         // -------------------------------------------------
         let mut update1 = Subject::new(sid);
         update1.keys.push(new1.evolve(sig_s1).1);
-        assert!(update1.check(Some(new1.clone())) == Ok(()));
+        assert!(update1.check(&Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
         // Updating Profile
@@ -453,7 +453,7 @@ mod tests {
 
         let mut update2 = Subject::new(sid);
         update2.push(p3);
-        assert!(update2.check(Some(new1.clone())) == Ok(()));
+        assert!(update2.check(&Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
         // Updating ProfileKey
@@ -465,7 +465,7 @@ mod tests {
 
         let mut update3 = Subject::new(sid);
         update3.push(empty_p2.clone());
-        assert!(update3.check(Some(new1.clone())) == Ok(()));
+        assert!(update3.check(&Some(new1.clone())) == Ok(()));
         
         //--------------------------------------------------
         // Merge and update
@@ -477,7 +477,7 @@ mod tests {
 
         let mut update4 = Subject::new(sid);
         update4.push(empty_p3);
-        assert!(update4.check(Some(new1.clone())) == Ok(()));
+        assert!(update4.check(&Some(new1.clone())) == Ok(()));
 
         // println!("ERROR: {:?}", subject3.check(Some(&subject1)));
     }
@@ -498,17 +498,17 @@ mod tests {
         new1
             .push(p1.clone())
             .keys.push(skey1.clone());
-        assert!(new1.check(None) == Ok(()));
+        assert!(new1.check(&None) == Ok(()));
 
         //--------------------------------------------------
         // Creating Subject
         // -------------------------------------------------
         let incorrect = Subject::new(sid);
-        assert!(incorrect.check(None) == Err("No key found for subject creation!".into()));
+        assert!(incorrect.check(&None) == Err("No key found for subject creation!".into()));
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(SubjectKey::sign(sid, 1, sig_key1, &sig_s1, &sig_key1));
-        assert!(incorrect.check(None) == Err("Incorrect key index for subject creation!".into()));
+        assert!(incorrect.check(&None) == Err("Incorrect key index for subject creation!".into()));
 
         //--------------------------------------------------
         // Evolving SubjectKey
@@ -522,11 +522,11 @@ mod tests {
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey2);
-        assert!(incorrect.check(Some(new1.clone())) == Err("Incorrect index for new subject-key!".into()));
+        assert!(incorrect.check(&Some(new1.clone())) == Err("Incorrect index for new subject-key!".into()));
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey3);
-        assert!(incorrect.check(Some(new1.clone())) == Err("Invalid subject-key signature!".into()));
+        assert!(incorrect.check(&Some(new1.clone())) == Err("Invalid subject-key signature!".into()));
 
         //--------------------------------------------------
         // Updating Profile
@@ -539,7 +539,7 @@ mod tests {
 
         let mut update1 = Subject::new(sid);
         update1.push(p2);
-        assert!(update1.check(Some(new1.clone())) == Err("ProfileKey is not correcly chained!".into()));
+        assert!(update1.check(&Some(new1.clone())) == Err("ProfileKey is not correcly chained!".into()));
 
     }
 }

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+
 use log::{info, error};
 
 use core_fpi::Result;
@@ -9,11 +10,11 @@ use crate::handlers::subjects::*;
 use crate::handlers::authorizations::*;
 use crate::handlers::queries::*;
 use crate::config::Config;
-use crate::databases::{AppDB, AppState};
+use crate::db::{AppDB, AppState};
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
-    db: Arc<AppDB>,
+    store: Arc<AppDB>,
 
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
@@ -25,20 +26,22 @@ impl Processor {
     pub fn new(cfg: Config) -> Self {
         let cfg = Arc::new(cfg);
 
-        let data_path = format!("{}/data", cfg.home);
-        let db = Arc::new(AppDB::new(&data_path));
+        let path = format!("{}/data", cfg.home);
+        let store = Arc::new(AppDB::new(&path));
         
         Self {
-            db: db.clone(),
+            store: store.clone(),
 
-            mkey_handler: MasterKeyHandler::new(cfg.clone(), db.clone()),
-            subject_handler: SubjectHandler::new(db.clone()),
-            auth_handler: AuthorizationHandler::new(db.clone()),
-            query_handler: QueryHandler::new(cfg.clone(), db.clone()),
+            mkey_handler: MasterKeyHandler::new(cfg.clone(), store.clone()),
+            subject_handler: SubjectHandler::new(store.clone()),
+            auth_handler: AuthorizationHandler::new(store.clone()),
+            query_handler: QueryHandler::new(cfg.clone(), store.clone()),
         }
     }
 
     pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
+        //TODO: needs transactions from local DB!
+
         let msg: Request = decode(data)?;
         match msg {
             Request::Negotiate(neg) => match neg {
@@ -60,29 +63,34 @@ impl Processor {
         }
     }
 
-    pub fn check(&self, data: &[u8]) -> Result<()> {
+    pub fn start(&self) {
+        info!("START-BLOCK");
+        self.store.start();
+    }
+
+    pub fn filter(&self, data: &[u8]) -> Result<()> {
         let msg: Commit = decode(data)?;
         match msg {
             Commit::Evidence(evd) => match evd {
                 Evidence::EMasterKey(mkey) => {
-                    info!("CHECK - Evidence::EMasterKey");
-                    self.mkey_handler.check(&mkey).map_err(|e|{
-                        error!("CHECK-ERR - Evidence::EMasterKey - {:?}", e);
+                    info!("FILTER - Evidence::EMasterKey");
+                    self.mkey_handler.filter(&mkey).map_err(|e|{
+                        error!("FILTER-ERR - Evidence::EMasterKey - {:?}", e);
                     e})
                 }
             },
 
             Commit::Value(value) => match value {
                 Value::VSubject(subject) => {
-                    info!("CHECK - Value::VSubject");
-                    self.subject_handler.check(&subject).map_err(|e|{
-                        error!("CHECK-ERR - Value::VSubject - {:?}", e);
+                    info!("FILTER - Value::VSubject");
+                    self.subject_handler.filter(&subject).map_err(|e|{
+                        error!("FILTER-ERR - Value::VSubject - {:?}", e);
                     e})
                 },
                 Value::VConsent(consent) => {
-                    info!("CHECK - Value::VConsent");
-                    self.auth_handler.check(&consent).map_err(|e|{
-                        error!("CHECK-ERR - Value::VConsent - {:?}", e);
+                    info!("FILTER - Value::VConsent");
+                    self.auth_handler.filter(&consent).map_err(|e|{
+                        error!("FILTER-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())
@@ -90,29 +98,29 @@ impl Processor {
         }
     }
 
-    pub fn commit(&mut self, data: &[u8]) -> Result<()> {
+    pub fn deliver(&mut self, data: &[u8]) -> Result<()> {
         let msg: Commit = decode(data)?;
         match msg {
             Commit::Evidence(evd) => match evd {
                 Evidence::EMasterKey(mkey) => {
-                    info!("COMMIT - Evidence::EMasterKey");
-                    self.mkey_handler.commit(mkey).map_err(|e|{
-                        error!("COMMIT-ERR - Evidence::EMasterKey - {:?}", e);
+                    info!("DELIVER - Evidence::EMasterKey");
+                    self.mkey_handler.deliver(mkey).map_err(|e|{
+                        error!("DELIVER-ERR - Evidence::EMasterKey - {:?}", e);
                     e})
                 }
             },
 
             Commit::Value(value) => match value {
                 Value::VSubject(subject) => {
-                    info!("COMMIT - Value::VSubject");
-                    self.subject_handler.commit(subject).map_err(|e|{
-                        error!("COMMIT-ERR - Value::VSubject - {:?}", e);
+                    info!("DELIVER - Value::VSubject");
+                    self.subject_handler.deliver(subject).map_err(|e|{
+                        error!("DELIVER-ERR - Value::VSubject - {:?}", e);
                     e})
                 },
                 Value::VConsent(consent) => {
-                    info!("COMMIT - Value::VConsent");
-                    self.auth_handler.commit(consent).map_err(|e|{
-                        error!("COMMIT-ERR - Value::VConsent - {:?}", e);
+                    info!("DELIVER - Value::VConsent");
+                    self.auth_handler.deliver(consent).map_err(|e|{
+                        error!("DELIVER-ERR - Value::VConsent - {:?}", e);
                     e})
                 },
                 _ => Err("Not implemented!".into())
@@ -120,16 +128,13 @@ impl Processor {
         }
     }
 
-    pub fn app_hash(&self) -> Vec<u8> {
-        self.db.get_hash()
+    pub fn commit(&self, height: i64) -> AppState {
+        let state = self.store.commit(height);
+        info!("COMMIT - (height = {:?}, hash = {:?})", state.height, bs58::encode(&state.hash).into_string());
+        state
     }
 
-    pub fn update_app_state(&self, height: i64, hash: Vec<u8>) {
-        let state = AppState { height, hash };
-        self.db.set_state(state)
-    }
-
-    pub fn app_state(&self) -> AppState {
-        self.db.get_state()
+    pub fn state(&self) -> AppState {
+        self.store.state()
     }
 }
