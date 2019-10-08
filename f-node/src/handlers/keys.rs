@@ -3,7 +3,7 @@ use log::info;
 use sha2::{Sha512, Digest};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{rnd_scalar, G, Result, Scalar};
+use core_fpi::{rnd_scalar, G, Result, Scalar, RistrettoPoint};
 use core_fpi::shares::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
@@ -51,15 +51,7 @@ impl MasterKeyHandler {
     pub fn filter(&self, evidence: &MasterKey) -> Result<()> {
         info!("FILTER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
 
-        // verify if the client has authorization to commit evidence (signature is verified on check)
-        /*if evidence.sig.key != self.cfg.admin {
-            return Err("Client has not authorization to commit master-key evidence!".into())
-        }
-
-        let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
-        evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys)*/
-
-        //TODO: should only verify signatures
+        //TODO: verify signature and timestamp
         Ok(())
     }
 
@@ -75,6 +67,14 @@ impl MasterKeyHandler {
             if tx.contains(&eid) {
                 return Err("Master-key evidence already exists!".into())
             }
+
+            // verify if the client has authorization to commit evidence (signature is verified on check)
+            if evidence.sig.key != self.cfg.admin {
+                return Err("Client has not authorization to commit master-key evidence!".into())
+            }
+
+            let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
+            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys)?;
         
             let n = self.cfg.peers.len();
             let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)

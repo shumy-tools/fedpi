@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use indexmap::{IndexMap, IndexSet};
 use serde::{Serialize, Deserialize};
 
 use crate::ids::*;
@@ -10,17 +10,17 @@ use crate::{Result, Scalar};
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Authorizations {
-    auths: BTreeMap<String, BTreeSet<String>>       // All profile authorizations per subject <subject: <profile>>
+    auths: IndexMap<String, IndexSet<String>>       // All profile authorizations per subject <subject: <profile>>
 }
 
 impl Authorizations {
     pub fn new() -> Self {
-        Self { auths: BTreeMap::new() }
+        Self { auths: IndexMap::new() }
     }
 
     pub fn authorize(&mut self, consent: &Consent) {
         let aid = consent.target.clone();
-        let consents = self.auths.entry(aid).or_insert_with(|| BTreeSet::<String>::new());
+        let consents = self.auths.entry(aid).or_insert_with(|| IndexSet::<String>::new());
         for item in consent.profiles.iter() {
             consents.insert(item.clone());
         }
@@ -30,11 +30,11 @@ impl Authorizations {
         let aid = consent.target.clone();
         if let Some(ref mut consents) = self.auths.get_mut(&aid) {
             for item in consent.profiles.iter() {
-                consents.remove(item);
+                consents.swap_remove(item);
             }
 
             if consents.is_empty() {
-                self.auths.remove(&aid);
+                self.auths.swap_remove(&aid);
             }
         }
     }

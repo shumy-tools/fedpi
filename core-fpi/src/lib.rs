@@ -3,7 +3,6 @@
 use curve25519_dalek::constants::{RISTRETTO_BASEPOINT_POINT, RISTRETTO_BASEPOINT_TABLE};
 use rand_os::OsRng;
 
-mod macros;
 mod crypto;
 mod structs;
 

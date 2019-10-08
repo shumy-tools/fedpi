@@ -19,7 +19,7 @@ impl SubjectHandler {
         info!("FILTER-SUBJECT - (sid = {:?}, #keys = {:?}, #profiles = {:?})", subject.sid, subject.keys.len(), subject.profiles.len());
         
         //let sid = sid(&subject.sid);
-        //TODO: should only verify signatures
+        //TODO: verify signature and timestamp
         Ok(())
     }
 

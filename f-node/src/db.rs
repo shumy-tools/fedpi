@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
+
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::any::Any;
@@ -16,7 +17,7 @@ use core_fpi::messages::*;
 
 pub const STATE: &str = "$state";
 pub const MASTER: &str = "master";
-pub const ENCRYPT: &str = "encrypt";
+//pub const ENCRYPT: &str = "encrypt";
 
 //--------------------------------------------------------------------
 // Rules to derive keys. Always use a prefix to avoid security issues, such as data override from different protocols!
@@ -26,7 +27,6 @@ pub fn aid(sid: &str) -> String { format!("aid-{}", sid) }                      
 pub fn pid(kid: &str) -> String { format!("pid-{}", kid) }                              // master-key-pair-id
 
 pub fn cid(sid: &str, sig: &str) -> String { format!("cid-{}-{}", sid, sig) }           // consent-id
-pub fn vid(kid: &str, sig: &str) -> String { format!("vid-{}-{}", kid, sig) }           // master-key-vote-id
 pub fn eid(kid: &str, sig: &str) -> String { format!("eid-{}-{}", kid, sig) }           // master-key-id (evidence)
 
 //--------------------------------------------------------------------
@@ -52,7 +52,7 @@ impl AppDB {
         cache.set(STATE, state);
         let cache = Arc::new(Mutex::new(cache));
 
-        let tx = Mutex::new(DbTx::new(store.clone(), cache.clone()));
+        let tx = Mutex::new(DbTx::new(store.clone()));
         Self { store, cache, tx }
     }
 
@@ -101,13 +101,27 @@ impl AppDB {
     }
 
     pub fn commit(&self, height: i64) -> AppState {
+        let state = self.state();
         let tx = self.tx.lock().unwrap();
-        let new_state = tx.commit(height);
-        
-        let guard = self.cache.lock().unwrap();
-        guard.set(STATE, new_state.clone());
 
-        new_state
+        if tx.pending() {
+            let new_state = tx.commit(height, state.hash);
+            
+            let guard = self.cache.lock().unwrap();
+            guard.set(STATE, new_state.clone());
+
+            new_state
+        } else if height != state.height {
+            let new_state = AppState { height, hash: state.hash };
+            
+            set(self.store.clone(), STATE, new_state.clone());
+            let guard = self.cache.lock().unwrap();
+            guard.set(STATE, new_state.clone());
+
+            new_state
+        } else {
+            state
+        }
     }
 }
 
@@ -116,7 +130,6 @@ impl AppDB {
 //--------------------------------------------------------------------
 pub struct DbTx {
     store: Arc<Db>,
-    cache: Arc<Mutex<MemCache>>,
 
     pending: AtomicBool,
     view: Mutex<MemCache>,
@@ -124,8 +137,8 @@ pub struct DbTx {
 }
 
 impl DbTx {
-    fn new(store: Arc<Db>, cache: Arc<Mutex<MemCache>>) -> Self {
-        Self { store, cache, pending: AtomicBool::new(false), view: Mutex::new(MemCache::new()), local: Mutex::new(MemCache::new()) }
+    fn new(store: Arc<Db>) -> Self {
+        Self { store, pending: AtomicBool::new(false), view: Mutex::new(MemCache::new()), local: Mutex::new(MemCache::new()) }
     }
 
     pub fn pending(&self) -> bool {
@@ -183,11 +196,8 @@ impl DbTx {
         guard.set(id, value);
     }
 
-    fn commit(&self, height: i64) -> AppState {
+    fn commit(&self, height: i64, prev: Vec<u8>) -> AppState {
         //TODO: verify if state.height + 1 == height ?
-
-        let store = self.store.clone();
-        let state: AppState = get(self.store.clone(), STATE).unwrap();
 
         // returns and clears all MemCache data
         let global_data = self.view.lock().unwrap().data();
@@ -195,7 +205,7 @@ impl DbTx {
 
         let mut batch = Batch::default();
         let mut hasher = Sha512::new();
-        hasher.input(state.hash);
+        hasher.input(prev);
 
         // update global tx data
         for (key, value) in global_data.into_iter() {
@@ -214,8 +224,8 @@ impl DbTx {
         batch.insert(STATE, state_data);
 
         // commit batch
-        store.apply_batch(batch).unwrap();
-        store.flush().map_err(|e| format!("Unable to flush: {}", e)).unwrap();
+        self.store.apply_batch(batch).unwrap();
+        self.store.flush().map_err(|e| format!("Unable to flush: {}", e)).unwrap();
 
         self.pending.store(false, Ordering::Relaxed);
         new_state
@@ -228,13 +238,13 @@ impl DbTx {
 type SafeAny = Any + Send + Sync;
 
 struct MemCache {
-    data_cache: RefCell<HashMap<String, Vec<u8>>>,
-    obj_cache: RefCell<HashMap<String, Box<SafeAny>>>,
+    data_cache: RefCell<IndexMap<String, Vec<u8>>>,
+    obj_cache: RefCell<IndexMap<String, Box<SafeAny>>>,
 }
 
 impl MemCache {
     fn new() -> Self {
-        Self { data_cache: RefCell::new(HashMap::new()), obj_cache: RefCell::new(HashMap::new()) }
+        Self { data_cache: RefCell::new(IndexMap::new()), obj_cache: RefCell::new(IndexMap::new()) }
     }
 
     fn contains(&self, id: &str) -> bool {
@@ -268,11 +278,11 @@ impl MemCache {
         map.insert(id.into(), Box::new(value));
     }
 
-    fn data(&self) -> HashMap<String, Vec<u8>> {
+    fn data(&self) -> IndexMap<String, Vec<u8>> {
         let mut map = self.obj_cache.borrow_mut();
         map.clear();
 
-        self.data_cache.replace(HashMap::new())
+        self.data_cache.replace(IndexMap::new())
     }
 }
 
@@ -287,6 +297,12 @@ pub struct AppState {
 
 fn contains(db: Arc<Db>, id: &str) -> bool {
     db.contains_key(id).map_err(|e| format!("Unable to verify if key exists: {}", e)).unwrap()
+}
+
+fn set<T: Serialize>(db: Arc<Db>, id: &str, value: T) {
+    let data = encode(&value).expect("Unable to encode structure!");
+    db.insert(id, data).map_err(|e| format!("Unable to set value in storage: {}", e)).unwrap();
+    db.flush().map_err(|e| format!("Unable to flush: {}", e)).unwrap();
 }
 
 fn get<T: DeserializeOwned>(db: Arc<Db>, id: &str) -> Option<T> {

@@ -22,15 +22,18 @@ impl QueryHandler {
 
     pub fn request(&mut self, disclose: DiscloseRequest) -> Result<Vec<u8>> {
         info!("REQUEST-DISCLOSE - (sid = {:?}, target = {:?}, #profiles = {:?})", disclose.sid, disclose.target, disclose.profiles.len());
-        let dsid = sid(&disclose.sid);
-        let tsid = sid(&disclose.target);
+        let tid = sid(&disclose.target);
+        let sid = sid(&disclose.sid);
         let aid = aid(&disclose.target);
 
-        let subject: Subject = self.store.get(&dsid).ok_or("Subject not found!")?;
+        //TODO: verify signature and timestamp
+
+        // search for subjects and check
+        let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
         disclose.check(&subject)?;
 
         let mkey = self.store.key(MASTER).ok_or("Master-key unavailable!")?;
-        let target: Subject = self.store.get(&tsid).ok_or("Target not found!")?;
+        let target: Subject = self.store.get(&tid).ok_or("No target subject found!")?;
         let auths: Authorizations = self.store.get(&aid).ok_or("No authorizations found for target!")?;
 
         // verify if the client has authorization to disclose profiles

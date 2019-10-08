@@ -19,12 +19,15 @@ impl AuthorizationHandler {
     pub fn filter(&self, consent: &Consent) -> Result<()> {
         info!("FILTER-CONSENT - (sid = {:?}, typ = {:?}, auth = {:?}, #profiles = {:?})", consent.sid, consent.typ, consent.target, consent.profiles.len());
         
-        //TODO: should only verify signatures
+        //TODO: verify signature and timestamp
         Ok(())
     }
 
     pub fn deliver(&mut self, consent: Consent) -> Result<()> {
         info!("DELIVER-CONSENT - (sid = {:?})", consent.sid);
+        let tid = sid(&consent.target);
+        let sid = sid(&consent.sid);
+
         let cid = cid(&consent.sid, consent.sig.id());
         let aid = aid(&consent.sid);
 
@@ -36,9 +39,12 @@ impl AuthorizationHandler {
                 return Err("Consent already exists!".into())
             }
 
-            // search for target subject
-            let sid = sid(&consent.target);
-            let subject: Subject = tx.get(&sid).ok_or("Subject target not found!")?;
+            // search for subjects and check
+            if !tx.contains(&tid) {
+                return Err("No target subject found!".into())
+            }
+
+            let subject: Subject = tx.get(&sid).ok_or("Subject not found!")?;
             consent.check(&subject)?;
 
             // create or update authorizations
@@ -47,7 +53,7 @@ impl AuthorizationHandler {
                 ConsentType::Consent => auths.authorize(&consent),
                 ConsentType::Revoke => auths.revoke(&consent)
             }
-            
+
             tx.set(&cid, consent);
             tx.set(&aid, auths);
         Ok(())
