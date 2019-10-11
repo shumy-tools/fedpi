@@ -15,20 +15,13 @@ impl SubjectHandler {
         Self { store }
     }
 
-    pub fn filter(&self, subject: &Subject) -> Result<()> {
-        info!("FILTER-SUBJECT - (sid = {:?}, #keys = {:?}, #profiles = {:?})", subject.sid, subject.keys.len(), subject.profiles.len());
-        
-        //let sid = sid(&subject.sid);
-        //TODO: verify signature and timestamp
-        Ok(())
-    }
-
     pub fn deliver(&mut self, subject: Subject) -> Result<()> {
-        info!("DELIVER-SUBJECT - (sid = {:?})", subject.sid);
+        info!("DELIVER-SUBJECT - (sid = {:?}, #keys = {:?}, #profiles = {:?})", subject.sid, subject.keys.len(), subject.profiles.len());
         let sid = sid(&subject.sid);
 
         // ---------------transaction---------------
         let tx = self.store.tx();
+            // check signatures and constraints
             let current: Option<Subject> = tx.get(&sid);
             subject.check(&current)?;
 

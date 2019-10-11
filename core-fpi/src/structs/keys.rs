@@ -1,5 +1,7 @@
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
 
+use crate::Authenticated;
 use crate::ids::*;
 use crate::{Result, Scalar, RistrettoPoint};
 use crate::shares::{Share, RistrettoPolynomial};
@@ -18,15 +20,14 @@ pub struct MasterKeyRequest {
     pub sig: IndSignature
 }
 
-impl MasterKeyRequest {
-    pub fn sign(sid: &str, kid: &str, peers: &[u8], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let sig_data = Self::data(sid, kid, peers);
-        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data); 
-        
-        Self { sid: sid.into(), kid: kid.into(), peers: peers.to_vec(), sig }
-    }
+impl Authenticated for MasterKeyRequest {
+    fn sid(&self) -> &str { &self.sid }
 
-    pub fn check(&self, subject: &Subject) -> Result<()> {
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
         let sig_data = Self::data(&self.sid, &self.kid, &self.peers);
         if !self.sig.verify(&skey.key, &sig_data) {
@@ -34,6 +35,15 @@ impl MasterKeyRequest {
         }
 
         Ok(())
+    }
+}
+
+impl MasterKeyRequest {
+    pub fn sign(sid: &str, kid: &str, peers: &[u8], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let sig_data = Self::data(sid, kid, peers);
+        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data); 
+        
+        Self { sid: sid.into(), kid: kid.into(), peers: peers.to_vec(), sig }
     }
 
     fn data(sid: &str, kid: &str, peers: &[u8]) -> [Vec<u8>; 3] {
@@ -92,6 +102,10 @@ impl MasterKeyVote {
 
             sig: IndSignature::sign(index, secret, key, &data)
         }
+    }
+
+    pub fn check_timestamp(&self, threshold: Duration) -> bool {
+        self.sig.sig.check_timestamp(threshold)
     }
 
     pub fn check(&self, session: &str, kid: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
@@ -164,6 +178,24 @@ pub struct MasterKey {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
+impl Authenticated for MasterKey {
+    fn sid(&self) -> &str { &self.sid }
+
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+        let sig_data = Self::data(&self.sid, &self.session, &self.kid, &self.matrix, &self.votes);
+        if !self.sig.verify(&skey.key, &sig_data) {
+            return Err("Invalid master-key signature!".into())
+        }
+
+        Ok(())
+    }
+}
+
 impl MasterKey {
     pub fn sign(sid: &str, session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], sig_s: &Scalar, sig_key: &SubjectKey) -> Result<Self> {
         // expecting responses from all peers
@@ -187,14 +219,9 @@ impl MasterKey {
         Ok(Self { sid: sid.into(), session: session.into(), kid: kid.into(), matrix, votes, sig, _phantom: () })
     }
 
-    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint], subject: &Subject) -> Result<()> {
+    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
         if self.votes.len() != n {
             return Err("Expecting votes from all peers!".into())
-        }
-
-        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
-        if !self.verify(&skey.key) {
-            return Err("MasterKey with invalid signature!".into())
         }
 
         // check matrix bounds before use
@@ -241,11 +268,6 @@ impl MasterKey {
         }
 
         (shares, commits, pkey)
-    }
-
-    fn verify(&self, key: &RistrettoPoint) -> bool {
-        let sig_data = Self::data(&self.sid, &self.session, &self.kid, &self.matrix, &self.votes);
-        self.sig.verify(&key, &sig_data)
     }
 
     fn data(sid: &str, session: &str, kid: &str, matrix: &PublicMatrix, votes: &[MasterKeyCompressedVote]) -> [Vec<u8>; 5] {

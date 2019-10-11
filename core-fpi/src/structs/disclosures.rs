@@ -1,6 +1,8 @@
 use indexmap::IndexMap;
 use serde::{Serialize, Deserialize};
+use std::time::Duration;
 
+use crate::Authenticated;
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
 use crate::crypto::shares::RistrettoShare;
@@ -19,15 +21,14 @@ pub struct DiscloseRequest {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
-impl DiscloseRequest {
-    pub fn sign(sid: &str, target: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let sig_data = Self::data(sid, target, profiles);
-        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
-        
-        Self { sid: sid.into(), target: target.into(), profiles: profiles.to_vec(), sig, _phantom: () }
-    }
+impl Authenticated for DiscloseRequest {
+    fn sid(&self) -> &str { &self.sid }
 
-    pub fn check(&self, subject: &Subject) -> Result<()> {
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
         let sig_data = Self::data(&self.sid, &self.target, &self.profiles);
         if !self.sig.verify(&skey.key, &sig_data) {
@@ -35,6 +36,15 @@ impl DiscloseRequest {
         }
 
         Ok(())
+    }
+}
+
+impl DiscloseRequest {
+    pub fn sign(sid: &str, target: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let sig_data = Self::data(sid, target, profiles);
+        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
+        
+        Self { sid: sid.into(), target: target.into(), profiles: profiles.to_vec(), sig, _phantom: () }
     }
 
     fn data(sid: &str, target: &str, profiles: &[String]) -> [Vec<u8>; 3] {

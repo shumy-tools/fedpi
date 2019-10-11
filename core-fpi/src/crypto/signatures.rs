@@ -1,12 +1,12 @@
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
+use chrono::Utc;
 
 use serde::{Serialize, Deserialize};
 use serde::ser::Serializer;
 use serde::de::{Deserializer, Error};
 
 use sha2::{Sha512, Digest};
-
-use chrono::Utc;
 
 use crate::{G, Scalar, RistrettoPoint, KeyEncoder};
 
@@ -119,6 +119,16 @@ impl Signature {
         let c = Scalar::from_hash(hasher);
 
         c == self.c
+    }
+
+    pub fn check_timestamp(&self, threshold: Duration) -> bool {
+        let now = Utc::now().timestamp();
+        let thr = threshold.as_secs() as i64;
+
+        let upper = self.timestamp + thr;
+        let lower = self.timestamp - thr;
+
+        now >= lower && now <= upper
     }
 }
 

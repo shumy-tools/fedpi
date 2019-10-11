@@ -1,6 +1,8 @@
 use indexmap::{IndexMap, IndexSet};
 use serde::{Serialize, Deserialize};
+use std::time::Duration;
 
+use crate::Authenticated;
 use crate::ids::*;
 use crate::crypto::signatures::IndSignature;
 use crate::{Result, Scalar};
@@ -66,6 +68,24 @@ pub struct Consent {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
+impl Authenticated for Consent {
+    fn sid(&self) -> &str { &self.sid }
+
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+        let sig_data = Self::data(&self.sid, &self.typ, &self.target, &self.profiles);
+        if !self.sig.verify(&skey.key, &sig_data) {
+            return Err("Invalid consent signature!".into())
+        }
+
+        Ok(())
+    }
+}
+
 impl Consent {
     pub fn sign(sid: &str, typ: ConsentType, target: &str, profiles: &[String], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
         let sig_data = Self::data(sid, &typ, target, profiles);
@@ -75,12 +95,6 @@ impl Consent {
     }
 
     pub fn check(&self, subject: &Subject) -> Result<()> {
-        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
-        let sig_data = Self::data(&self.sid, &self.typ, &self.target, &self.profiles);
-        if !self.sig.verify(&skey.key, &sig_data) {
-            return Err("Invalid consent signature!".into())
-        }
-
         // check for existing profiles in the subject
         for item in self.profiles.iter() {
             if !subject.profiles.contains_key(item) {

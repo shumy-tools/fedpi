@@ -3,11 +3,10 @@ use log::info;
 use sha2::{Sha512, Digest};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{rnd_scalar, G, Result, Scalar, RistrettoPoint};
+use core_fpi::{rnd_scalar, G, Result, Scalar};
 use core_fpi::shares::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
-use core_fpi::ids::*;
 
 use crate::config::Config;
 use crate::db::*;
@@ -24,11 +23,7 @@ impl MasterKeyHandler {
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
-        let sid = sid(&req.sid);
         let eid = eid(&req.kid, req.sig.id());
-
-        let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
-        req.check(&subject)?;
 
         if self.store.contains(&eid) {
             return Err("Master-key evidence already exists!".into())
@@ -53,24 +48,15 @@ impl MasterKeyHandler {
         encode(&msg)
     }
 
-    pub fn filter(&self, evidence: &MasterKey) -> Result<()> {
-        info!("FILTER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
-
-        //TODO: verify signature and timestamp
-        Ok(())
-    }
-
     pub fn deliver(&mut self, evidence: MasterKey) -> Result<()> {
-        info!("DELIVER-KEY - (session = {:?})", evidence.session);
-        let sid = sid(&evidence.sid);
+        info!("DELIVER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
         let eid = eid(&evidence.kid, evidence.sig.id());
         let pid = pid(&evidence.kid);
 
         // ---------------transaction---------------
         let tx = self.store.tx();
-            let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
-            let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
-            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys, &subject)?;
+            // check constraints
+            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &self.cfg.peers_keys)?;
 
             // avoid evidence override
             if tx.contains(&eid) {

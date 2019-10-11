@@ -1,4 +1,6 @@
-use crate::Result;
+use std::time::Duration;
+
+use crate::{Result, Authenticated};
 use crate::structs::authorizations::*;
 use crate::structs::disclosures::*;
 use crate::structs::ids::*;
@@ -50,6 +52,28 @@ pub enum Request {
     Query(Query)
 }
 
+
+fn request_msg(req: &Request) -> &Authenticated {
+    match req {
+        Request::Negotiate(neg) => match neg {
+            Negotiate::NMasterKeyRequest(req) => req
+        },
+        Request::Query(query) => match query {
+            Query::QDiscloseRequest(req) => req
+        }
+    }
+}
+
+impl Authenticated for Request {
+    fn sid(&self) -> &str {
+        request_msg(self).sid()
+    }
+
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        request_msg(self).verify(subject, threshold)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Negotiate {
     NMasterKeyRequest(MasterKeyRequest)
@@ -86,6 +110,30 @@ pub enum QResult {
 pub enum Commit {
     Evidence(Evidence),
     Value(Value)
+}
+
+fn commit_msg(req: &Commit) -> &Authenticated {
+    match req {
+        Commit::Evidence(evd) => match evd {
+            Evidence::EMasterKey(req) => req
+        },
+
+        Commit::Value(value) => match value {
+            Value::VSubject(req) => req,
+            Value::VConsent(req) => req,
+            _ => unimplemented!()
+        }
+    }
+}
+
+impl Authenticated for Commit {
+    fn sid(&self) -> &str {
+        commit_msg(self).sid()
+    }
+
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        commit_msg(self).verify(subject, threshold)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

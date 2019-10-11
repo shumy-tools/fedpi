@@ -1,16 +1,21 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use log::{info, error};
 
-use core_fpi::Result;
+use core_fpi::{Result, Authenticated};
+use core_fpi::ids::*;
 use core_fpi::messages::*;
 
 use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
 use crate::handlers::authorizations::*;
 use crate::handlers::queries::*;
+
 use crate::config::Config;
-use crate::db::{AppDB, AppState};
+use crate::db::*;
+
+const TIMESTAMP_THRESHOLD: u64 = 60;
 
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
@@ -40,13 +45,16 @@ impl Processor {
     }
 
     pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
-        //TODO: needs transactions from local DB!
-
         let msg: Request = decode(data)?;
+        
+        // check signature and timestamp range
+        let sid = sid(msg.sid());
+        let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
+        msg.verify(&subject, Duration::from_secs(TIMESTAMP_THRESHOLD))?;
+
         match msg {
             Request::Negotiate(neg) => match neg {
                 Negotiate::NMasterKeyRequest(req) => {
-                    info!("REQUEST - Negotiate::NMasterKeyRequest");
                     self.mkey_handler.request(req).map_err(|e|{
                         error!("REQUEST-ERR - Negotiate::NMasterKeyRequest - {:?}", e);
                     e})
@@ -54,7 +62,6 @@ impl Processor {
             },
             Request::Query(query) => match query {
                 Query::QDiscloseRequest(req) => {
-                    info!("REQUEST - Query::QDiscloseRequest");
                     self.query_handler.request(req).map_err(|e|{
                         error!("REQUEST-ERR - Query::QDiscloseRequest - {:?}", e);
                     e})
@@ -68,34 +75,29 @@ impl Processor {
         self.store.start();
     }
 
+    // check signature and timestamp range
     pub fn filter(&self, data: &[u8]) -> Result<()> {
         let msg: Commit = decode(data)?;
-        match msg {
-            Commit::Evidence(evd) => match evd {
-                Evidence::EMasterKey(mkey) => {
-                    info!("FILTER - Evidence::EMasterKey");
-                    self.mkey_handler.filter(&mkey).map_err(|e|{
-                        error!("FILTER-ERR - Evidence::EMasterKey - {:?}", e);
-                    e})
-                }
-            },
 
-            Commit::Value(value) => match value {
-                Value::VSubject(subject) => {
-                    info!("FILTER - Value::VSubject");
-                    self.subject_handler.filter(&subject).map_err(|e|{
-                        error!("FILTER-ERR - Value::VSubject - {:?}", e);
-                    e})
-                },
-                Value::VConsent(consent) => {
-                    info!("FILTER - Value::VConsent");
-                    self.auth_handler.filter(&consent).map_err(|e|{
-                        error!("FILTER-ERR - Value::VConsent - {:?}", e);
-                    e})
-                },
-                _ => Err("Not implemented!".into())
+        let sid = sid(msg.sid());
+        let t_sub: Option<Subject> = self.store.get(&sid);
+        let mut subject = t_sub.as_ref();
+        
+        // handle exception for creation
+        if subject.is_none() {
+            if let Commit::Value(value) = &msg {
+                if let Value::VSubject(sub) = value {
+                    subject = Some(sub)
+                }
             }
         }
+
+        if subject.is_none() {
+            error!("Subject not found!");
+            return Err("Subject not found!".into());
+        }
+
+        msg.verify(subject.unwrap(), Duration::from_secs(TIMESTAMP_THRESHOLD))
     }
 
     pub fn deliver(&mut self, data: &[u8]) -> Result<()> {

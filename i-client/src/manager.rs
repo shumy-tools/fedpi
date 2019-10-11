@@ -211,9 +211,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
-
                 let consent = Consent::sign(&self.sid, ConsentType::Consent, authorized, profiles, &my.secret, skey);
-                consent.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 // sync update
                 let update = Update { sid: self.sid.clone(), msg: Value::VConsent(consent), secret: my.secret, profile_secrets: HashMap::new() };
@@ -231,9 +229,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
-                
                 let revoke = Consent::sign(&self.sid, ConsentType::Revoke, authorized, profiles, &my.secret, skey);
-                revoke.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 // sync update
                 let update = Update { sid: self.sid.clone(), msg: Value::VConsent(revoke), secret: my.secret, profile_secrets: HashMap::new() };
@@ -252,9 +248,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
             None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
             Some(my) => {
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
-                
                 let disclose = DiscloseRequest::sign(&self.sid, target, profiles, &my.secret, skey);
-                disclose.check(&my.subject).map_err(|e| Error::new(ErrorKind::Other, format!("Invalid consent: {}", e)))?;
 
                 let min = 2*self.config.threshold + 1;
 

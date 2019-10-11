@@ -1,8 +1,10 @@
 use indexmap::IndexMap;
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
 
+use crate::Authenticated;
 use crate::crypto::signatures::IndSignature;
 use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 
@@ -25,6 +27,24 @@ impl Debug for Subject {
             .field("keys", &self.keys)
             .field("profiles", &self.profiles.values())
             .finish()
+    }
+}
+
+impl Authenticated for Subject {
+    fn sid(&self) -> &str { &self.sid }
+
+    fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+
+        for item in self.keys.iter() {
+            item.verify(&subject.sid, &skey, threshold)?;
+        }
+
+        for item in self.profiles.values() {
+            item.verify(&subject.sid, &skey, threshold)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -78,7 +98,6 @@ impl Subject {
         }
     }
 
-    // TODO: should be replaced by check_full with proper changes (verify key chain and select correct SubjectKey for profile)
     fn check_create(&self) -> Result<()> {
         // TODO: check "sid" string format
 
@@ -88,12 +107,9 @@ impl Subject {
             return Err("Incorrect key index for subject creation!".into())
         }
 
-        // a self-signed SubjectKey
-        active_key.check(&self.sid, active_key)?;
-
         // check profiles (it's ok if there are no profiles)
         let empty_map = IndexMap::<String, Profile>::new();
-        Subject::check_profiles(&self.sid, &self.profiles, &empty_map, active_key)
+        Subject::check_profiles(&self.profiles, &empty_map)
     }
 
     fn check_evolve(&self, current: &Subject) -> Result<()>  {
@@ -104,8 +120,6 @@ impl Subject {
         if active_key.sig.index + 1 != new_key.sig.index {
             return Err("Incorrect index for new subject-key!".into())
         }
-
-        new_key.check(&self.sid, active_key)?;
 
         if !self.profiles.is_empty() {
             return Err("Subject key-evolution cannot have profiles!".into())
@@ -119,25 +133,22 @@ impl Subject {
             // if it executes it's a bug in the code
             return Err("self.sid != update.sid".into())
         }
-
-        // get active key for subject
-        let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
-
+        
         // check profiles
         if self.profiles.is_empty() {
             return Err("Subject update must have at least one profile!".into())
         }
 
-        Subject::check_profiles(&self.sid, &self.profiles, &current.profiles, active_key)
+        Subject::check_profiles(&self.profiles, &current.profiles)
     }
 
-    fn check_profiles(sid: &str, profiles: &IndexMap<String, Profile>, current: &IndexMap<String, Profile>, sig_key: &SubjectKey) -> Result<()> {
+    fn check_profiles(profiles: &IndexMap<String, Profile>, current: &IndexMap<String, Profile>) -> Result<()> {
         for (typ, item) in profiles.iter() {
             if *typ != item.typ {
                 return Err("Incorrect profile map-key!".into())
             }
 
-            item.check(sid, current.get(typ), sig_key)?;
+            item.check(current.get(typ))?;
         }
 
         Ok(())
@@ -172,7 +183,11 @@ impl SubjectKey {
         Self { key: skey, sig, _phantom: () }
     }
 
-    fn check(&self, sid: &str, sig_key: &SubjectKey) -> Result<()> {
+    fn verify(&self, sid: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
         let sig_data = Self::data(sid, self.sig.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid subject-key signature!".into())
@@ -256,7 +271,15 @@ impl Profile {
         }
     }
 
-    fn check(&self, sid: &str, current: Option<&Profile>, sig_key: &SubjectKey) -> Result<()> {
+    pub fn verify(&self, sid: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
+        for item in self.locations.values() {
+            item.verify(sid, &self.typ, sig_key, threshold)?;
+        }
+
+        Ok(())
+    }
+
+    fn check(&self, current: Option<&Profile>) -> Result<()> {
         // TODO: check "typ"?
 
         for (lurl, item) in self.locations.iter() {
@@ -271,7 +294,7 @@ impl Profile {
                 }
             };
 
-            item.check(sid, &self.typ, current_location, sig_key)?;
+            item.check(current_location)?;
         }
 
         Ok(())
@@ -323,7 +346,15 @@ impl ProfileLocation {
         self.chain.extend(update.chain);
     }
 
-    fn check(&self, sid: &str, typ: &str, current: Option<&ProfileLocation>, sig_key: &SubjectKey) -> Result<()> {
+    pub fn verify(&self, sid: &str, typ: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
+        for item in self.chain.iter() {
+            item.verify(sid, typ, &self.lurl, sig_key, threshold)?;
+        }
+
+        Ok(())
+    }
+
+    fn check(&self, current: Option<&ProfileLocation>) -> Result<()> {
         // check profile
         let mut prev = match current {
             None => {
@@ -346,7 +377,6 @@ impl ProfileLocation {
                 return Err("ProfileKey is not correcly chained!".into())
             }
 
-            item.check(sid, typ, &self.lurl, sig_key)?;
             prev = item.index as i32;
         }
 
@@ -385,7 +415,11 @@ impl ProfileKey {
         Self { index, key: skey, sig, _phantom: () }
     }
 
-    fn check(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey) -> Result<()> {
+    pub fn verify(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
+        if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }
+
         let sig_data = Self::data(sid, typ, lurl, self.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Invalid profile-key signature!".into())
@@ -436,6 +470,7 @@ mod tests {
             .push(p1)
             .push(p2)
             .keys.push(skey1.clone());
+        assert!(new1.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(new1.check(&None) == Ok(()));
 
         //--------------------------------------------------
@@ -443,6 +478,7 @@ mod tests {
         // -------------------------------------------------
         let mut update1 = Subject::new(sid);
         update1.keys.push(new1.evolve(sig_s1).1);
+        assert!(update1.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(update1.check(&Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
@@ -453,6 +489,7 @@ mod tests {
 
         let mut update2 = Subject::new(sid);
         update2.push(p3);
+        assert!(update2.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(update2.check(&Some(new1.clone())) == Ok(()));
 
         //--------------------------------------------------
@@ -465,6 +502,7 @@ mod tests {
 
         let mut update3 = Subject::new(sid);
         update3.push(empty_p2.clone());
+        assert!(update3.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(update3.check(&Some(new1.clone())) == Ok(()));
         
         //--------------------------------------------------
@@ -477,6 +515,7 @@ mod tests {
 
         let mut update4 = Subject::new(sid);
         update4.push(empty_p3);
+        assert!(update4.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(update4.check(&Some(new1.clone())) == Ok(()));
 
         // println!("ERROR: {:?}", subject3.check(Some(&subject1)));
@@ -498,6 +537,7 @@ mod tests {
         new1
             .push(p1.clone())
             .keys.push(skey1.clone());
+        assert!(new1.verify(&new1, Duration::from_secs(5)) == Ok(()));
         assert!(new1.check(&None) == Ok(()));
 
         //--------------------------------------------------
@@ -526,7 +566,7 @@ mod tests {
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey3);
-        assert!(incorrect.check(&Some(new1.clone())) == Err("Invalid subject-key signature!".into()));
+        assert!(incorrect.verify(&new1, Duration::from_secs(5)) == Err("Invalid subject-key signature!".into()));
 
         //--------------------------------------------------
         // Updating Profile

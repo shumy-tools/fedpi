@@ -16,15 +16,8 @@ impl AuthorizationHandler {
         Self { store }
     }
 
-    pub fn filter(&self, consent: &Consent) -> Result<()> {
-        info!("FILTER-CONSENT - (sid = {:?}, typ = {:?}, auth = {:?}, #profiles = {:?})", consent.sid, consent.typ, consent.target, consent.profiles.len());
-        
-        //TODO: verify signature and timestamp
-        Ok(())
-    }
-
     pub fn deliver(&mut self, consent: Consent) -> Result<()> {
-        info!("DELIVER-CONSENT - (sid = {:?})", consent.sid);
+        info!("DELIVER-CONSENT -  (sid = {:?}, typ = {:?}, auth = {:?}, #profiles = {:?})", consent.sid, consent.typ, consent.target, consent.profiles.len());
         let tid = sid(&consent.target);
         let sid = sid(&consent.sid);
 
@@ -33,6 +26,7 @@ impl AuthorizationHandler {
 
         // ---------------transaction---------------
         let tx = self.store.tx();
+            // check constraints
             let subject: Subject = tx.get(&sid).ok_or("Subject not found!")?;
             consent.check(&subject)?;
             
@@ -41,7 +35,7 @@ impl AuthorizationHandler {
                 return Err("Consent already exists!".into())
             }
 
-            // search for subjects and check
+            // search for target subject and check
             if !tx.contains(&tid) {
                 return Err("No target subject found!".into())
             }

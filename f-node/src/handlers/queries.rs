@@ -23,14 +23,7 @@ impl QueryHandler {
     pub fn request(&mut self, disclose: DiscloseRequest) -> Result<Vec<u8>> {
         info!("REQUEST-DISCLOSE - (sid = {:?}, target = {:?}, #profiles = {:?})", disclose.sid, disclose.target, disclose.profiles.len());
         let tid = sid(&disclose.target);
-        let sid = sid(&disclose.sid);
         let aid = aid(&disclose.target);
-
-        //TODO: verify signature and timestamp
-
-        // search for subjects and check
-        let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
-        disclose.check(&subject)?;
 
         let mkey = self.store.key(MASTER).ok_or("Master-key unavailable!")?;
         let target: Subject = self.store.get(&tid).ok_or("No target subject found!")?;
@@ -51,6 +44,8 @@ impl QueryHandler {
                 }
             }
         }
+
+        // TODO: register disclosure!
 
         let res = DiscloseResult::sign(&disclose.sig.sig.encoded, dkeys, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
         let msg = Response::QResult(QResult::QDiscloseResult(res));
