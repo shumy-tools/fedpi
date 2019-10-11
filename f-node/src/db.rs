@@ -84,10 +84,6 @@ impl AppDB {
         }
     }
 
-    /*pub fn contains(&self, id: &str) -> bool {
-        contains(self.store.clone(), id)
-    }*/
-
     pub fn get<T: DeserializeOwned + Clone + Send + Sync + 'static>(&self, id: &str) -> Option<T> {
         get(self.store.clone(), id)
     }

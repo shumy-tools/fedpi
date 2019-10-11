@@ -10,12 +10,12 @@ use core_fpi::ids::*;
 use crate::config::Config;
 use crate::db::*;
 
-pub struct QueryHandler {
+pub struct DisclosureHandler {
     cfg: Arc<Config>,
     store: Arc<AppDB>
 }
 
-impl QueryHandler {
+impl DisclosureHandler {
     pub fn new(cfg: Arc<Config>, store: Arc<AppDB>) -> Self {
         Self { cfg, store }
     }
@@ -36,7 +36,7 @@ impl QueryHandler {
                 return Err(format!("Subject has not authorization to disclose profile: {}", typ))
             }
 
-            let prof = target.profiles.get(typ).ok_or("Bug in code. No profile found, but there is an authorization!")?;
+            let prof = target.profiles.get(typ).ok_or("No profile found, but there is an authorization!")?;
             for (_, loc) in prof.locations.iter() {
                 for pkey in loc.chain.iter() {
                     let pseudo_i = &mkey.share * &pkey.key;

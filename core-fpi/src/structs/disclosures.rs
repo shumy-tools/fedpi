@@ -2,8 +2,8 @@ use indexmap::IndexMap;
 use serde::{Serialize, Deserialize};
 use std::time::Duration;
 
-use crate::Authenticated;
 use crate::ids::*;
+use crate::structs::*;
 use crate::crypto::signatures::IndSignature;
 use crate::crypto::shares::RistrettoShare;
 use crate::{Result, Scalar, RistrettoPoint};
@@ -21,18 +21,36 @@ pub struct DiscloseRequest {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
-impl Authenticated for DiscloseRequest {
+impl Constraints for DiscloseRequest {
     fn sid(&self) -> &str { &self.sid }
 
     fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if self.sid.len() > MAX_SUBJECT_ID_SIZE {
+            return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
+        }
+
+        if self.target.len() > MAX_SUBJECT_ID_SIZE {
+            return Err(format!("Field Constraint - (target, max-size = {})", MAX_SUBJECT_ID_SIZE))
+        }
+
+        if self.profiles.len() > MAX_PROFILES {
+            return Err(format!("Field Constraint - (profiles, max-size = {})", MAX_PROFILES))
+        }
+
+        for item in self.profiles.iter() {
+            if item.len() > MAX_PROFILE_ID_SIZE {
+                return Err(format!("Field Constraint - (profile-id, max-size = {})", MAX_PROFILE_ID_SIZE))
+            }
+        }
+
         if !self.sig.sig.check_timestamp(threshold) {
-            return Err("Timestamp out of valid range!".into())
+            return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
         let sig_data = Self::data(&self.sid, &self.target, &self.profiles);
         if !self.sig.verify(&skey.key, &sig_data) {
-            return Err("Invalid disclose-request signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{Result, Authenticated};
+use crate::{Result, Constraints};
 use crate::structs::authorizations::*;
 use crate::structs::disclosures::*;
 use crate::structs::ids::*;
@@ -53,7 +53,7 @@ pub enum Request {
 }
 
 
-fn request_msg(req: &Request) -> &Authenticated {
+fn request_msg(req: &Request) -> &Constraints {
     match req {
         Request::Negotiate(neg) => match neg {
             Negotiate::NMasterKeyRequest(req) => req
@@ -64,7 +64,7 @@ fn request_msg(req: &Request) -> &Authenticated {
     }
 }
 
-impl Authenticated for Request {
+impl Constraints for Request {
     fn sid(&self) -> &str {
         request_msg(self).sid()
     }
@@ -112,7 +112,7 @@ pub enum Commit {
     Value(Value)
 }
 
-fn commit_msg(req: &Commit) -> &Authenticated {
+fn commit_msg(req: &Commit) -> &Constraints {
     match req {
         Commit::Evidence(evd) => match evd {
             Evidence::EMasterKey(req) => req
@@ -126,7 +126,7 @@ fn commit_msg(req: &Commit) -> &Authenticated {
     }
 }
 
-impl Authenticated for Commit {
+impl Constraints for Commit {
     fn sid(&self) -> &str {
         commit_msg(self).sid()
     }

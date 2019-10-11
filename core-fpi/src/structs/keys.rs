@@ -1,10 +1,10 @@
 use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 
-use crate::Authenticated;
 use crate::ids::*;
+use crate::structs::*;
 use crate::{Result, Scalar, RistrettoPoint};
-use crate::shares::{Share, RistrettoPolynomial};
+use crate::shares::{Share, RistrettoPolynomial, Degree};
 use crate::signatures::IndSignature;
 
 use serde::{Serialize, Deserialize};
@@ -20,18 +20,30 @@ pub struct MasterKeyRequest {
     pub sig: IndSignature
 }
 
-impl Authenticated for MasterKeyRequest {
+impl Constraints for MasterKeyRequest {
     fn sid(&self) -> &str { &self.sid }
 
     fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if self.sid.len() > MAX_SUBJECT_ID_SIZE {
+            return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
+        }
+
+        if self.kid.len() > MAX_KEY_ID_SIZE {
+            return Err(format!("Field Constraint - (kid, max-size = {})", MAX_KEY_ID_SIZE))
+        }
+
+        if self.peers.len() > MAX_HASH_SIZE {
+            return Err(format!("Field Constraint - (peers, max-size = {})", MAX_HASH_SIZE))
+        }
+
         if !self.sig.sig.check_timestamp(threshold) {
-            return Err("Timestamp out of valid range!".into())
+            return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
         let sig_data = Self::data(&self.sid, &self.kid, &self.peers);
         if !self.sig.verify(&skey.key, &sig_data) {
-            return Err("Invalid master-key request signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())
@@ -44,6 +56,14 @@ impl MasterKeyRequest {
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data); 
         
         Self { sid: sid.into(), kid: kid.into(), peers: peers.to_vec(), sig }
+    }
+
+    pub fn check(&self, peers_hash: &[u8]) -> Result<()> {
+        if self.peers != peers_hash {
+            return Err("Field Constraint - (peers, Incorrect peers-hash)".into())
+        }
+
+        Ok(())
     }
 
     fn data(sid: &str, kid: &str, peers: &[u8]) -> [Vec<u8>; 3] {
@@ -89,32 +109,36 @@ impl Debug for MasterKeyVote {
 }
 
 impl MasterKeyVote {
-    pub fn sign(session: &str, kid: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
-        let sig_data = Self::data(session, kid, peers, &shares, &pkeys, &commit);
+    pub fn sign(session: &str, kid: &str, peers_hash: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
+        let sig_data = Self::data(session, kid, peers_hash, &shares, &pkeys, &commit);
         let sig = IndSignature::sign(index, secret, key, &sig_data);
 
-        Self { session: session.into(), kid: kid.into(), peers: peers.to_vec(), shares, pkeys, commit, sig }
+        Self { session: session.into(), kid: kid.into(), peers: peers_hash.to_vec(), shares, pkeys, commit, sig }
     }
 
-    pub fn check(&self, session: &str, kid: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
+    pub fn check(&self, session: &str, kid: &str, peers_hash: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
         /*if !self.sig.sig.check_timestamp(threshold) {
             return Err("Timestamp out of valid range!".into())
         }*/
 
         if self.session != session {
-            return Err("KeyResponse, expected the same session!".into())
+            return Err("Field Constraint - (session, Expected the same session)".into())
         }
 
         if self.kid != kid {
-            return Err("KeyResponse, expected the same key-id!".into())
+            return Err("Field Constraint - (kid, Expected the same key-id)".into())
+        }
+
+        if self.peers != peers_hash {
+            return Err("Field Constraint - (peers, Incorrect peers-hash)".into())
         }
 
         if self.shares.len() != n || self.pkeys.len() != n {
-            return Err("KeyResponse, expected vectors with the same lenght (shares, pkeys)!".into())
+            return Err("Field Constraint - (shares/pkeys, Expected vectors with the correct lenght)".into())
         }
 
-        if self.peers != peers {
-            return Err("KeyResponse, expected the same peers!".into())
+        if self.commit.degree() != n + 1 {
+            return Err("Field Constraint - (commit, Incorrect polynomial degree)".into())
         }
 
         let sig_data = Self::data(&self.session, &self.kid, &self.peers, &self.shares, &self.pkeys, &self.commit);
@@ -166,18 +190,44 @@ pub struct MasterKey {
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
-impl Authenticated for MasterKey {
+impl Constraints for MasterKey {
     fn sid(&self) -> &str { &self.sid }
 
     fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
+        if self.sid.len() > MAX_SUBJECT_ID_SIZE {
+            return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
+        }
+
+        if self.session.len() > MAX_SESSION_SIZE {
+            return Err(format!("Field Constraint - (session, max-size = {})", MAX_SESSION_SIZE))
+        }
+
+        if self.kid.len() > MAX_KEY_ID_SIZE {
+            return Err(format!("Field Constraint - (kid, max-size = {})", MAX_KEY_ID_SIZE))
+        }
+
+        if self.matrix.triangle.len() > MAX_PEERS {
+            return Err(format!("Field Constraint - (matrix, max-size = {})", MAX_PEERS))
+        }
+
+        for line in self.matrix.triangle.iter() {
+            if line.len() > MAX_PEERS {
+                return Err(format!("Field Constraint - (matrix-line, max-size = {})", MAX_PEERS))
+            }
+        }
+
+        if self.votes.len() > MAX_PEERS {
+            return Err(format!("Field Constraint - (votes, max-size = {})", MAX_PEERS))
+        }
+
         if !self.sig.sig.check_timestamp(threshold) {
-            return Err("Timestamp out of valid range!".into())
+            return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
         let sig_data = Self::data(&self.sid, &self.session, &self.kid, &self.matrix, &self.votes);
         if !self.sig.verify(&skey.key, &sig_data) {
-            return Err("Invalid master-key signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())
@@ -207,16 +257,17 @@ impl MasterKey {
 
     pub fn check(&self, peers_hash: &[u8], pkeys: &[RistrettoPoint]) -> Result<()> {
         let n = pkeys.len();
+
+        self.matrix.check(n)?;
+        
         if self.votes.len() != n {
             return Err("Expecting votes from all peers!".into())
         }
 
-        // check matrix bounds before use
-        self.matrix.check(n)?;
-
         // reconstruct each KeyResponse and check
         for i in 0..n {
             let item = &self.votes[i];
+            item.check(n)?;
 
             let resp = MasterKeyVote {
                 session: self.session.clone(),
@@ -276,6 +327,20 @@ pub struct MasterKeyCompressedVote {
     pub sig: IndSignature
 }
 
+impl MasterKeyCompressedVote {
+    fn check(&self, n: usize) -> Result<()> {
+        if self.shares.len() != n {
+            return Err("Field Constraint - (shares, Expected vector with the correct lenght)".into())
+        }
+
+        if self.commit.degree() != n + 1 {
+            return Err("Field Constraint - (commit, Incorrect polynomial degree)".into())
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PublicMatrix {
     pub triangle: Vec<Vec<RistrettoPoint>>
@@ -304,15 +369,15 @@ impl PublicMatrix {
         Ok(Self { triangle: matrix })
     }
 
-    fn check(&self, length: usize) -> Result<()> {
-        if self.triangle.len() != length {
-            return Err("MasterKey matrix of incorrect size!".into())
+    fn check(&self, n: usize) -> Result<()> {
+        if self.triangle.len() != n {
+            return Err("Matrix of incorrect size!".into())
         }
 
         // check if it's a triangular matrix
-        for i in 0..length {
-            if self.triangle[i].len() != length - i {
-                return Err("MasterKey matrix with incorrect triangle!".into())
+        for i in 0..n {
+            if self.triangle[i].len() != n - i {
+                return Err("Matrix with incorrect triangle!".into())
             }
         }
 

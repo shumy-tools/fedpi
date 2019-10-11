@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::{Serialize, Deserialize};
 
-use crate::Authenticated;
+use crate::structs::*;
 use crate::crypto::signatures::IndSignature;
 use crate::{G, rnd_scalar, Result, KeyEncoder, Scalar, RistrettoPoint};
 
@@ -30,18 +30,69 @@ impl Debug for Subject {
     }
 }
 
-impl Authenticated for Subject {
+impl Constraints for Subject {
     fn sid(&self) -> &str { &self.sid }
 
     fn verify(&self, subject: &Subject, threshold: Duration) -> Result<()> {
         let skey = subject.keys.last().ok_or("No active subject-key found!")?;
 
-        for item in self.keys.iter() {
-            item.verify(&subject.sid, &skey, threshold)?;
+        // TODO: check "sid" format
+        if self.sid.len() > MAX_SUBJECT_ID_SIZE {
+            return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
         }
 
-        for item in self.profiles.values() {
-            item.verify(&subject.sid, &skey, threshold)?;
+        if self.keys.len() > MAX_SUBJECT_KEY_SIZE {
+            return Err(format!("Field Constraint - (keys, max-size = {})", MAX_SUBJECT_KEY_SIZE))
+        }
+
+        if self.profiles.len() > MAX_PROFILES {
+            return Err(format!("Field Constraint - (profiles, max-size = {})", MAX_PROFILES))
+        }
+
+        for (typ, prof) in self.profiles.iter() {
+            // TODO: check "typ" format
+
+            if typ.len() > MAX_PROFILE_ID_SIZE {
+                return Err(format!("Field Constraint - (profile-id, max-size = {})", MAX_PROFILE_ID_SIZE))
+            }
+
+            if *typ != prof.typ {
+                return Err("Field Constraint - (profile-id, Incorrect map-key)".into())
+            }
+
+            if prof.locations.len() > MAX_LOCATIONS {
+                return Err(format!("Field Constraint - (locations, max-size = {})", MAX_LOCATIONS))
+            }
+
+            for (lurl, loc) in prof.locations.iter() {
+                // TODO: check "lurl" format
+
+                if lurl.len() > MAX_LOCATION_ID_SIZE {
+                    return Err(format!("Field Constraint - (location-id, max-size = {})", MAX_LOCATION_ID_SIZE))
+                }
+
+                if *lurl != loc.lurl {
+                    return Err("Field Constraint - (location-id, Incorrect map-key)".into())
+                }
+
+                if loc.chain.len() > MAX_KEY_CHAIN {
+                    return Err(format!("Field Constraint - (chain, max-size = {})", MAX_KEY_CHAIN))
+                }
+
+                let mut prev = loc.chain.get(0).ok_or("Field Constraint - (chain, Location must have keys)")?;
+                for (i, key) in loc.chain.iter().enumerate() {
+                    if i > 0 && prev.index + 1 != key.index {
+                        return Err("Field Constraint - (chain, Keys are not correcly chained)".into())
+                    }
+
+                    key.verify(&self.sid, &typ, &lurl, &skey, threshold)?;
+                    prev = key;
+                }
+            }
+        }
+
+        for key in self.keys.iter() {
+            key.verify(&subject.sid, &skey, threshold)?;
         }
 
         Ok(())
@@ -99,8 +150,6 @@ impl Subject {
     }
 
     fn check_create(&self) -> Result<()> {
-        // TODO: check "sid" string format
-
         // if it reaches here it must have one key with index 0
         let active_key = self.keys.last().ok_or("No key found for subject creation!")?;
         if active_key.sig.index != 0 {
@@ -108,8 +157,11 @@ impl Subject {
         }
 
         // check profiles (it's ok if there are no profiles)
-        let empty_map = IndexMap::<String, Profile>::new();
-        Subject::check_profiles(&self.profiles, &empty_map)
+        for item in self.profiles.values() {
+            item.check(None)?;
+        }
+
+        Ok(())
     }
 
     fn check_evolve(&self, current: &Subject) -> Result<()>  {
@@ -139,16 +191,8 @@ impl Subject {
             return Err("Subject update must have at least one profile!".into())
         }
 
-        Subject::check_profiles(&self.profiles, &current.profiles)
-    }
-
-    fn check_profiles(profiles: &IndexMap<String, Profile>, current: &IndexMap<String, Profile>) -> Result<()> {
-        for (typ, item) in profiles.iter() {
-            if *typ != item.typ {
-                return Err("Incorrect profile map-key!".into())
-            }
-
-            item.check(current.get(typ))?;
+        for (typ, item) in self.profiles.iter() {
+            item.check(current.profiles.get(typ))?;
         }
 
         Ok(())
@@ -185,12 +229,12 @@ impl SubjectKey {
 
     fn verify(&self, sid: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
         if !self.sig.sig.check_timestamp(threshold) {
-            return Err("Timestamp out of valid range!".into())
+            return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
         let sig_data = Self::data(sid, self.sig.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid subject-key signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())
@@ -271,22 +315,8 @@ impl Profile {
         }
     }
 
-    pub fn verify(&self, sid: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
-        for item in self.locations.values() {
-            item.verify(sid, &self.typ, sig_key, threshold)?;
-        }
-
-        Ok(())
-    }
-
     fn check(&self, current: Option<&Profile>) -> Result<()> {
-        // TODO: check "typ"?
-
         for (lurl, item) in self.locations.iter() {
-            if *lurl != item.lurl {
-                return Err("Incorrect profile-location map-key!".into())
-            }
-
             let current_location = match current {
                 None => None,
                 Some(current) => {
@@ -346,14 +376,6 @@ impl ProfileLocation {
         self.chain.extend(update.chain);
     }
 
-    pub fn verify(&self, sid: &str, typ: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
-        for item in self.chain.iter() {
-            item.verify(sid, typ, &self.lurl, sig_key, threshold)?;
-        }
-
-        Ok(())
-    }
-
     fn check(&self, current: Option<&ProfileLocation>) -> Result<()> {
         // check profile
         let mut prev = match current {
@@ -366,11 +388,6 @@ impl ProfileLocation {
                 pkey.index as i32
             }
         };
-
-        // check profile keys
-        if self.chain.is_empty() {
-            return Err("Profile-location must have keys!".into())
-        }
 
         for item in self.chain.iter() {
             if prev + 1 != item.index as i32 {
@@ -415,14 +432,14 @@ impl ProfileKey {
         Self { index, key: skey, sig, _phantom: () }
     }
 
-    pub fn verify(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
+    fn verify(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
         if !self.sig.sig.check_timestamp(threshold) {
-            return Err("Timestamp out of valid range!".into())
+            return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
         let sig_data = Self::data(sid, typ, lurl, self.index, &self.key);
         if !self.sig.verify(&sig_key.key, &sig_data) {
-            return Err("Invalid profile-key signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())

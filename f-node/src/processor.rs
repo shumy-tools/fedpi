@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use log::{info, error};
 
-use core_fpi::{Result, Authenticated};
+use core_fpi::{Result, Constraints};
 use core_fpi::ids::*;
 use core_fpi::messages::*;
 
 use crate::handlers::keys::*;
 use crate::handlers::subjects::*;
 use crate::handlers::authorizations::*;
-use crate::handlers::queries::*;
+use crate::handlers::disclosures::*;
 
 use crate::config::Config;
 use crate::db::*;
@@ -24,7 +24,7 @@ pub struct Processor {
     mkey_handler: MasterKeyHandler,
     subject_handler: SubjectHandler,
     auth_handler: AuthorizationHandler,
-    query_handler: QueryHandler
+    disclosure_handler: DisclosureHandler
 }
 
 impl Processor {
@@ -40,14 +40,14 @@ impl Processor {
             mkey_handler: MasterKeyHandler::new(cfg.clone(), store.clone()),
             subject_handler: SubjectHandler::new(store.clone()),
             auth_handler: AuthorizationHandler::new(store.clone()),
-            query_handler: QueryHandler::new(cfg.clone(), store.clone()),
+            disclosure_handler: DisclosureHandler::new(cfg.clone(), store.clone()),
         }
     }
 
     pub fn request(&mut self, data: &[u8]) -> Result<Vec<u8>> {
         let msg: Request = decode(data)?;
         
-        // check signature and timestamp range
+        // check field constraints, signature and timestamp range
         let sid = sid(msg.sid());
         let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
         msg.verify(&subject, Duration::from_secs(TIMESTAMP_THRESHOLD))?;
@@ -62,7 +62,7 @@ impl Processor {
             },
             Request::Query(query) => match query {
                 Query::QDiscloseRequest(req) => {
-                    self.query_handler.request(req).map_err(|e|{
+                    self.disclosure_handler.request(req).map_err(|e|{
                         error!("REQUEST-ERR - Query::QDiscloseRequest - {:?}", e);
                     e})
                 }

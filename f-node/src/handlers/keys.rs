@@ -24,13 +24,12 @@ impl MasterKeyHandler {
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
 
+        // check constraints
+        req.check(&self.cfg.peers_hash)?;
+
         // verify if the subject has authorization to fire negotiation
         if req.sid != self.cfg.admin {
             return Err("Subject has not authorization to negotiate a master-key!".into())
-        }
-
-        if self.cfg.peers_hash != req.peers {
-            return Err("Incorrect peers-hash!".into())
         }
 
         let e_keys = self.derive_encryption_keys(&req.sig.id());        // encryption keys (e_i)
@@ -50,11 +49,19 @@ impl MasterKeyHandler {
 
     pub fn deliver(&mut self, evidence: MasterKey) -> Result<()> {
         info!("DELIVER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
+        let mkrid = mkrid(&evidence.sid, &evidence.session);
         let mkid = mkid(&evidence.kid, evidence.sig.id());
         let mkpid = mkpid(&evidence.kid);
 
         // ---------------transaction---------------
         let tx = self.store.tx();
+            // check constraints
+            evidence.check(&self.cfg.peers_hash, &self.cfg.peers_keys)?;
+
+            if !tx.contains(&mkrid) {
+                return Err("MasterKeyRequest not found!".into())
+            }
+
             // verify if the subject has authorization to commit evidence
             if evidence.sid != self.cfg.admin {
                 return Err("Subject has not authorization to commit the master-key evidence!".into())
@@ -64,9 +71,6 @@ impl MasterKeyHandler {
             if tx.contains(&mkid) {
                 return Err("Master-key evidence already exists!".into())
             }
-
-            // check constraints
-            evidence.check(&self.cfg.peers_hash, &self.cfg.peers_keys)?;
         
             let n = self.cfg.peers.len();
             let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)

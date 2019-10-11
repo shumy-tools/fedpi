@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 
+use crate::structs::*;
 use crate::crypto::signatures::Signature;
 use crate::{OPEN, CLOSE, Result, Scalar, RistrettoPoint};
 
@@ -23,6 +24,14 @@ impl Record {
     }
 
     pub fn check(&self, last: Option<&Record>, base: &RistrettoPoint, pseudonym: &RistrettoPoint) -> Result<()> {
+        if self.prev.len() > MAX_HASH_SIZE {
+            return Err(format!("Field Constraint - (prev, max-size = {})", MAX_HASH_SIZE))
+        }
+
+        if self.prev.len() > MAX_DATA_SIZE {
+            return Err(format!("Field Constraint - (data, max-size = {})", MAX_DATA_SIZE))
+        }
+
         let prev = match last {
             None => if self.prev != OPEN {
                 return Err("Record not marked as open!".into())
