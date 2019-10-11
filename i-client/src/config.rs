@@ -27,8 +27,9 @@ pub struct Config {
     pub log: LevelFilter,
 
     pub threshold: usize,
+    pub peers: Vec<Peer>,
     pub peers_hash: Vec<u8>,
-    pub peers: Vec<Peer>
+    pub peers_keys: Vec<RistrettoPoint>
 }
 
 impl Config {
@@ -70,7 +71,10 @@ impl Config {
             _ => panic!("Log level not recognized!")
         };
 
-        Self { log, threshold: t_cfg.threshold, peers_hash: hasher.result().to_vec(), peers }
+        let peers_hash = hasher.result().to_vec();
+        let peers_keys: Vec<RistrettoPoint> = peers.iter().map(|p| p.pkey).collect();
+
+        Self { log, threshold: t_cfg.threshold, peers, peers_hash, peers_keys }
     }
 }
 

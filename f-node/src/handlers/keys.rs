@@ -23,19 +23,14 @@ impl MasterKeyHandler {
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
-        let eid = eid(&req.kid, req.sig.id());
 
-        if self.store.contains(&eid) {
-            return Err("Master-key evidence already exists!".into())
+        // verify if the subject has authorization to fire negotiation
+        if req.sid != self.cfg.admin {
+            return Err("Subject has not authorization to negotiate a master-key!".into())
         }
 
         if self.cfg.peers_hash != req.peers {
             return Err("Incorrect peers-hash!".into())
-        }
-
-        // verify if the client has authorization to fire negotiation
-        if req.sid != self.cfg.admin {
-            return Err("Client has not authorization to negotiate master-key!".into())
         }
 
         let e_keys = self.derive_encryption_keys(&req.sig.id());        // encryption keys (e_i)
@@ -45,28 +40,33 @@ impl MasterKeyHandler {
         // (session, ordered peer's list, encrypted shares, Feldman's Coefficients, peer signature)
         let vote = MasterKeyVote::sign(&req.sig.id(), &req.kid, &self.cfg.peers_hash, e_shares.0, p_keys, e_shares.1, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
         let msg = Response::Vote(Vote::VMasterKeyVote(vote));
+
+        // store local evidence
+        let mkrid = mkrid(&req.sid, req.sig.id());
+        self.store.set_local(&mkrid, req);
+
         encode(&msg)
     }
 
     pub fn deliver(&mut self, evidence: MasterKey) -> Result<()> {
         info!("DELIVER-KEY - (session = {:?}, #votes = {:?})", evidence.session, evidence.votes.len());
-        let eid = eid(&evidence.kid, evidence.sig.id());
-        let pid = pid(&evidence.kid);
+        let mkid = mkid(&evidence.kid, evidence.sig.id());
+        let mkpid = mkpid(&evidence.kid);
 
         // ---------------transaction---------------
         let tx = self.store.tx();
-            // check constraints
-            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &self.cfg.peers_keys)?;
+            // verify if the subject has authorization to commit evidence
+            if evidence.sid != self.cfg.admin {
+                return Err("Subject has not authorization to commit the master-key evidence!".into())
+            }
 
             // avoid evidence override
-            if tx.contains(&eid) {
+            if tx.contains(&mkid) {
                 return Err("Master-key evidence already exists!".into())
             }
 
-            // verify if the client has authorization to commit evidence (signature is verified on check)
-            if evidence.sid != self.cfg.admin {
-                return Err("Client has not authorization to commit master-key evidence!".into())
-            }
+            // check constraints
+            evidence.check(&self.cfg.peers_hash, &self.cfg.peers_keys)?;
         
             let n = self.cfg.peers.len();
             let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)
@@ -105,8 +105,8 @@ impl MasterKeyHandler {
                 public: y_public
             };
 
-            tx.set(&eid, evidence);
-            tx.set_local(&pid, pair);
+            tx.set(&mkid, evidence);
+            tx.set_local(&mkpid, pair);
 
             /* TODO: how to to evolve all existing pseudonyms?
                 * This is an issue, because the pseudonyms are not in the federated network!

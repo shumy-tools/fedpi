@@ -24,10 +24,13 @@ pub const MASTER: &str = "master";
 //--------------------------------------------------------------------
 pub fn sid(sid: &str) -> String { format!("sid-{}", sid) }                              // subject-id
 pub fn aid(sid: &str) -> String { format!("aid-{}", sid) }                              // authorizations-id
-pub fn pid(kid: &str) -> String { format!("pid-{}", kid) }                              // master-key-pair-id
+pub fn mkpid(kid: &str) -> String { format!("mkpid-{}", kid) }                          // master-key-pair-id
 
-pub fn cid(sid: &str, sig: &str) -> String { format!("cid-{}-{}", sid, sig) }           // consent-id
-pub fn eid(kid: &str, sig: &str) -> String { format!("eid-{}-{}", kid, sig) }           // master-key-id (evidence)
+pub fn cid(sid: &str, sig: &str) -> String { format!("cid-{}-{}", sid, sig) }           // consent-id    (evidence)
+pub fn did(sid: &str, sig: &str) -> String { format!("did-{}-{}", sid, sig) }           // disclosure-id (evidence)
+
+pub fn mkrid(kid: &str, sig: &str) -> String { format!("mkrid-{}-{}", kid, sig) }       // master-key-request-id    (evidence)
+pub fn mkid(kid: &str, sig: &str) -> String { format!("mkid-{}-{}", kid, sig) }         // master-key-id            (evidence)
 
 //--------------------------------------------------------------------
 // AppDB
@@ -62,31 +65,41 @@ impl AppDB {
     }
 
     pub fn key(&self, kid: &str) -> Option<MasterKeyPair> {
-        let kid = pid(kid);
+        let mkpid = mkpid(kid);
 
         let guard = self.cache.lock().unwrap();
-        let cached = guard.get(&kid);
+        let cached = guard.get(&mkpid);
         if cached.is_some() {
             return cached
         }
 
         //TODO: decrypt key from storage
-        let mkey: Option<MasterKeyPair> = self.get(&kid);
+        let mkey: Option<MasterKeyPair> = self.get(&mkpid);
         match mkey {
             None => None,
             Some(obj) => {
-                guard.set(&kid, obj.clone());
+                guard.set(&mkpid, obj.clone());
                 Some(obj)
             }
         }
     }
 
-    pub fn contains(&self, id: &str) -> bool {
+    /*pub fn contains(&self, id: &str) -> bool {
         contains(self.store.clone(), id)
-    }
+    }*/
 
     pub fn get<T: DeserializeOwned + Clone + Send + Sync + 'static>(&self, id: &str) -> Option<T> {
         get(self.store.clone(), id)
+    }
+
+    // doesn't include the value in the app-state
+    pub fn set_local<T: Serialize + Clone + Send + Sync + 'static>(&self, id: &str, value: T)  {
+        if id.starts_with('$') {
+            panic!("Trying to set a reserved key!");
+        }
+
+        //TODO: encrypt storage?
+        set(self.store.clone(), id, value);
     }
 
     pub fn start(&self) {

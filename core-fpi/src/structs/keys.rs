@@ -90,25 +90,17 @@ impl Debug for MasterKeyVote {
 
 impl MasterKeyVote {
     pub fn sign(session: &str, kid: &str, peers: &[u8], shares: Vec<Share>, pkeys: Vec<RistrettoPoint>, commit: RistrettoPolynomial, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
-        let data = Self::data(session, kid, peers, &shares, &pkeys, &commit);
-        Self {
-            session: session.into(),
-            kid: kid.into(),
-            peers: peers.to_vec(),
+        let sig_data = Self::data(session, kid, peers, &shares, &pkeys, &commit);
+        let sig = IndSignature::sign(index, secret, key, &sig_data);
 
-            shares,
-            pkeys,
-            commit,
-
-            sig: IndSignature::sign(index, secret, key, &data)
-        }
-    }
-
-    pub fn check_timestamp(&self, threshold: Duration) -> bool {
-        self.sig.sig.check_timestamp(threshold)
+        Self { session: session.into(), kid: kid.into(), peers: peers.to_vec(), shares, pkeys, commit, sig }
     }
 
     pub fn check(&self, session: &str, kid: &str, peers: &[u8], n: usize, pkey: &RistrettoPoint) -> Result<()> {
+        /*if !self.sig.sig.check_timestamp(threshold) {
+            return Err("Timestamp out of valid range!".into())
+        }*/
+
         if self.session != session {
             return Err("KeyResponse, expected the same session!".into())
         }
@@ -125,8 +117,9 @@ impl MasterKeyVote {
             return Err("KeyResponse, expected the same peers!".into())
         }
 
-        if !self.verify(pkey) {
-            return Err("KeyResponse with invalid signature!".into())
+        let sig_data = Self::data(&self.session, &self.kid, &self.peers, &self.shares, &self.pkeys, &self.commit);
+        if !self.sig.verify(pkey, &sig_data) {
+            return Err("Invalid master-key request signature!".into())
         }
 
         // it's assured that all vectors are of the same size
@@ -142,11 +135,6 @@ impl MasterKeyVote {
         }
 
         Ok(())
-    }
-
-    fn verify(&self, pkey: &RistrettoPoint) -> bool {
-        let data = Self::data(&self.session, &self.kid, &self.peers, &self.shares, &self.pkeys, &self.commit);
-        self.sig.verify(pkey, &data)
     }
 
     fn data(session: &str, kid: &str, peers: &[u8], shares: &[Share], pkeys: &[RistrettoPoint], commit: &RistrettoPolynomial) -> [Vec<u8>; 6] {
@@ -197,16 +185,14 @@ impl Authenticated for MasterKey {
 }
 
 impl MasterKey {
-    pub fn sign(sid: &str, session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], sig_s: &Scalar, sig_key: &SubjectKey) -> Result<Self> {
-        // expecting responses from all peers
-        if votes.len() != n {
-            return Err("Expecting responses from all peers!".into())
-        }
+    pub fn sign(sid: &str, session: &str, kid: &str, peers_hash: &[u8], votes: Vec<MasterKeyVote>, pkeys: &[RistrettoPoint], sig_s: &Scalar, sig_key: &SubjectKey) -> Result<Self> {
+        let n = pkeys.len();
 
         // check all peer responses
         for item in votes.iter() {
-            let key = pkeys.get(item.sig.index).ok_or("MasterKey, expecting to find a peer at index!")?;
-            item.check(session, kid, peers, n, key)?;
+            let key = pkeys.get(item.sig.index)
+                .ok_or_else(|| format!("MasterKey, expecting to find a peer at index: {}", item.sig.index))?;
+            item.check(session, kid, peers_hash, n, key)?;
         }
 
         let matrix = PublicMatrix::create(&votes)?;
@@ -219,7 +205,8 @@ impl MasterKey {
         Ok(Self { sid: sid.into(), session: session.into(), kid: kid.into(), matrix, votes, sig, _phantom: () })
     }
 
-    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
+    pub fn check(&self, peers_hash: &[u8], pkeys: &[RistrettoPoint]) -> Result<()> {
+        let n = pkeys.len();
         if self.votes.len() != n {
             return Err("Expecting votes from all peers!".into())
         }
@@ -234,7 +221,7 @@ impl MasterKey {
             let resp = MasterKeyVote {
                 session: self.session.clone(),
                 kid: self.kid.clone(),
-                peers: peers.to_vec(),
+                peers: peers_hash.to_vec(),
                 
                 shares: item.shares.clone(),
                 pkeys: self.matrix.expand(n, i),
@@ -244,7 +231,7 @@ impl MasterKey {
             };
 
             let key = pkeys.get(item.sig.index).ok_or("MasterKey, expecting to find a peer at index!")?;
-            resp.check(&self.session, &self.kid, peers, n, key)?;
+            resp.check(&self.session, &self.kid, peers_hash, n, key)?;
         }
 
         Ok(())

@@ -11,7 +11,7 @@ use serde::{Serialize, Deserialize};
 use bincode::{serialize, deserialize};
 use clear_on_drop::clear::Clear;
 
-use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder, RistrettoPoint};
+use core_fpi::{G, rnd_scalar, Scalar, KeyEncoder};
 use core_fpi::ids::*;
 use core_fpi::authorizations::*;
 use core_fpi::disclosures::*;
@@ -362,8 +362,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 }
 
                 // If all is OK, create MasterKey to commit
-                let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-                let mk = MasterKey::sign(&self.sid, &req.sig.id(), kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &my.secret, skey)
+                let mk = MasterKey::sign(&self.sid, &req.sig.id(), kid, &self.config.peers_hash, votes, &self.config.peers_keys, &my.secret, skey)
                     .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
                 // select a random peer

@@ -32,8 +32,8 @@ impl QueryHandler {
         // verify if the client has authorization to disclose profiles
         let mut dkeys = DiscloseKeys::new();
         for typ in disclose.profiles.iter() {
-            if !auths.is_authorized(&disclose.sid, typ) {
-                return Err(format!("Subject has not authorization for profile: {}", typ))
+            if disclose.sid != disclose.target && !auths.is_authorized(&disclose.sid, typ) {
+                return Err(format!("Subject has not authorization to disclose profile: {}", typ))
             }
 
             let prof = target.profiles.get(typ).ok_or("Bug in code. No profile found, but there is an authorization!")?;
@@ -45,10 +45,13 @@ impl QueryHandler {
             }
         }
 
-        // TODO: register disclosure!
-
         let res = DiscloseResult::sign(&disclose.sig.sig.encoded, dkeys, &self.cfg.secret, &self.cfg.pkey, self.cfg.index);
         let msg = Response::QResult(QResult::QDiscloseResult(res));
+        
+        // store local evidence
+        let did = did(&disclose.sid, disclose.sig.id());
+        self.store.set_local(&did, disclose);
+        
         encode(&msg)
     }
 }
