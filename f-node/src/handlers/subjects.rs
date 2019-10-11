@@ -29,7 +29,6 @@ impl SubjectHandler {
 
         // ---------------transaction---------------
         let tx = self.store.tx();
-
             let current: Option<Subject> = tx.get(&sid);
             subject.check(&current)?;
 

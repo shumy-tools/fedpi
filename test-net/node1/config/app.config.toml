@@ -6,7 +6,7 @@ threshold = 1                                               # Number of permitte
 port = 26651                                                # Set the service port for tendermint
 
 log = "info"                                                # Set the log level
-admin = "HjnGnJFDVcPWk9BcwBLE5yrdgw7gzGpieqiZ1paYdpqD"      # Set the management key authorized for negotiations
+admin = "shumy"                                             # Set the admin subject authorized for negotiations
 
 # List of valid peers
 [peers]

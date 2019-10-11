@@ -1,7 +1,4 @@
 
-secret = "G8RGj2BRXkHY1NawaijfkM9hD4xh557pp7jg4W5c2om7"       # Scalar
-pkey = "GEA2sfjCAX6i13eSZwTPgy3frw5Pefga3ABeQHEiMhJx"         # CompressedRistretto  (not included in the peers)
-
 threshold = 1                                               # Number of permitted failing nodes, where #peers >= 3 * t
 log = "info"                                                # Set the log level
 

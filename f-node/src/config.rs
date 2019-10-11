@@ -10,7 +10,7 @@ fn cfg_default() -> String {
     let pkey = (secret * G).compress();
 
     format!(r#"
-    name = "<no-name>"                  # Set the name of the node here
+    name = <no-name>                    # Set the name of the node here
     secret = {:?}                       # Scalar
     pkey = {:?}                         # CompressedRistretto  (not included in the peers)
     
@@ -18,7 +18,7 @@ fn cfg_default() -> String {
     port = 26658                        # Set the service port for tendermint
 
     log = "info"                        # Set the log level
-    admin = "<public-key-base64>"       # Set the management key authorized for negotiations
+    admin = <subject-id>                # Set the admin subject authorized for negotiations
 
     # List of valid peers
     [peers]
@@ -44,7 +44,7 @@ pub struct Config {
     pub port: usize,
 
     pub log: LevelFilter,
-    pub admin: RistrettoPoint,
+    pub admin: String,
     
     pub peers_hash: Vec<u8>,
     pub peers: Vec<Peer>
@@ -65,7 +65,6 @@ impl Config {
 
         let t_cfg: TomlConfig = toml::from_str(&cfg).expect("Unable to decode toml configuration!");
         let pkey: CompressedRistretto = t_cfg.pkey.decode();
-        let admin: CompressedRistretto = t_cfg.admin.decode();
         
         let mut peers = Vec::<Peer>::with_capacity(t_cfg.peers.len());
         let mut hasher = Sha512::new();
@@ -104,7 +103,7 @@ impl Config {
             port: t_cfg.port,
 
             log: llog,
-            admin: admin.decompress().expect("Unable to decompress mng-key!"),
+            admin: t_cfg.admin,
 
             peers_hash: hasher.result().to_vec(),
             peers

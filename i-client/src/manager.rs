@@ -332,46 +332,55 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
     }
 
     pub fn negotiate(&mut self, kid: &str) -> Result<()> {
-        let n = self.config.peers.len();
-        let req = MasterKeyRequest::sign(kid, &self.config.peers_hash, &self.config.secret, self.config.pkey);
+        self.check_pending()?;
+        
+        match &self.sto {
+            None => Err(Error::new(ErrorKind::Other, "There is not subject in the store!")),
+            Some(my) => {
+                let n = self.config.peers.len();
 
-        // set the results in ordered fashion
-        let mut votes = Vec::<MasterKeyVote>::with_capacity(n);
-        for peer in self.config.peers.iter() {
-            let res = (self.query)(peer, Request::Negotiate(Negotiate::NMasterKeyRequest(req.clone())))?;
-            match res {
-                Response::Vote(vote) => match vote {
-                    Vote::VMasterKeyVote(vote) => {
-                        let peer = self.config.peers.get(vote.sig.index).ok_or("Unexpected peer index!")
-                            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-                        
-                        vote.check(&req.sig.id(), &kid, &self.config.peers_hash, self.config.peers.len(), &peer.pkey)
-                            .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
+                let req = MasterKeyRequest::sign(&self.sid, kid, &self.config.peers_hash, &my.secret, skey);
 
-                        if votes.get(vote.sig.index).is_some() {
-                            // TODO: replace this with ignore or retry strategy?
-                            return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
-                        }
+                // set the results in ordered fashion
+                let mut votes = Vec::<MasterKeyVote>::with_capacity(n);
+                for peer in self.config.peers.iter() {
+                    let res = (self.query)(peer, Request::Negotiate(Negotiate::NMasterKeyRequest(req.clone())))?;
+                    match res {
+                        Response::Vote(vote) => match vote {
+                            Vote::VMasterKeyVote(vote) => {
+                                let peer = self.config.peers.get(vote.sig.index).ok_or("Unexpected peer index!")
+                                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                                
+                                vote.check(&req.sig.id(), &kid, &self.config.peers_hash, self.config.peers.len(), &peer.pkey)
+                                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
 
-                        votes.insert(vote.sig.index, vote);
+                                if votes.get(vote.sig.index).is_some() {
+                                    // TODO: replace this with ignore or retry strategy?
+                                    return Err(Error::new(ErrorKind::Other, "Replaced response on key negotiation!"))
+                                }
+
+                                votes.insert(vote.sig.index, vote);
+                            }
+                        },
+                        _ => return Err(Error::new(ErrorKind::Other, "Unexpected response on key negotiation!"))
                     }
-                },
-                _ => return Err(Error::new(ErrorKind::Other, "Unexpected response on key negotiation!"))
+                }
+
+                // If all is OK, create MasterKey to commit
+                let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
+                let mk = MasterKey::sign(&self.sid, &req.sig.id(), kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &my.secret, skey)
+                    .map_err(|e| Error::new(ErrorKind::Other, e))?;
+
+                // select a random peer
+                let selection = self.config.peers.choose(&mut rand::thread_rng());
+
+                // process master-key commit
+                match selection {
+                    None => Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
+                    Some(sel) => (self.commit)(&sel, Commit::Evidence(Evidence::EMasterKey(mk)))
+                }
             }
-        }
-
-        // If all is OK, create MasterKey to commit
-        let pkeys: Vec<RistrettoPoint> = self.config.peers.iter().map(|p| p.pkey).collect();
-        let mk = MasterKey::sign(&req.sig.id(), kid, &self.config.peers_hash, votes, self.config.peers.len(), &pkeys, &self.config.secret, self.config.pkey)
-            .map_err(|e| Error::new(ErrorKind::Other, e))?;
-
-        // select a random peer
-        let selection = self.config.peers.choose(&mut rand::thread_rng());
-
-        // process master-key commit
-        match selection {
-            None => Err(Error::new(ErrorKind::Other, "No peer found to send request!")),
-            Some(sel) => (self.commit)(&sel, Commit::Evidence(Evidence::EMasterKey(mk)))
         }
     }
 

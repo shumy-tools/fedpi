@@ -7,6 +7,7 @@ use core_fpi::{rnd_scalar, G, Result, Scalar, RistrettoPoint};
 use core_fpi::shares::*;
 use core_fpi::messages::*;
 use core_fpi::keys::*;
+use core_fpi::ids::*;
 
 use crate::config::Config;
 use crate::db::*;
@@ -23,7 +24,11 @@ impl MasterKeyHandler {
 
     pub fn request(&mut self, req: MasterKeyRequest) -> Result<Vec<u8>> {
         info!("REQUEST-KEY - (session = {:?}, kid = {:?})", req.sig.id(), req.kid);
+        let sid = sid(&req.sid);
         let eid = eid(&req.kid, req.sig.id());
+
+        let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
+        req.check(&subject)?;
 
         if self.store.contains(&eid) {
             return Err("Master-key evidence already exists!".into())
@@ -34,7 +39,7 @@ impl MasterKeyHandler {
         }
 
         // verify if the client has authorization to fire negotiation
-        if req.sig.key != self.cfg.admin || !req.verify() {
+        if req.sid != self.cfg.admin {
             return Err("Client has not authorization to negotiate master-key!".into())
         }
 
@@ -57,11 +62,15 @@ impl MasterKeyHandler {
 
     pub fn deliver(&mut self, evidence: MasterKey) -> Result<()> {
         info!("DELIVER-KEY - (session = {:?})", evidence.session);
+        let sid = sid(&evidence.sid);
         let eid = eid(&evidence.kid, evidence.sig.id());
         let pid = pid(&evidence.kid);
 
         // ---------------transaction---------------
         let tx = self.store.tx();
+            let subject: Subject = self.store.get(&sid).ok_or("Subject not found!")?;
+            let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
+            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys, &subject)?;
 
             // avoid evidence override
             if tx.contains(&eid) {
@@ -69,12 +78,9 @@ impl MasterKeyHandler {
             }
 
             // verify if the client has authorization to commit evidence (signature is verified on check)
-            if evidence.sig.key != self.cfg.admin {
+            if evidence.sid != self.cfg.admin {
                 return Err("Client has not authorization to commit master-key evidence!".into())
             }
-
-            let pkeys: Vec<RistrettoPoint> = self.cfg.peers.iter().map(|p| p.pkey).collect();
-            evidence.check(&self.cfg.peers_hash, self.cfg.peers.len(), &pkeys)?;
         
             let n = self.cfg.peers.len();
             let e_shares = evidence.extract(self.cfg.index);                    // encrypted shares, Feldman's Coefs and PublicKey (e_i + y_i -> p_i, A_k, Y)

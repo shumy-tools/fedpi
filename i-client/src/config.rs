@@ -1,25 +1,19 @@
 use std::collections::HashMap;
 use log::LevelFilter;
 use sha2::{Sha512, Digest};
-use clear_on_drop::clear::Clear;
 
 use serde::{Deserialize};
-use core_fpi::{G, rnd_scalar, KeyEncoder, HardKeyDecoder, Scalar, RistrettoPoint, CompressedRistretto};
+use core_fpi::{HardKeyDecoder, RistrettoPoint, CompressedRistretto};
 
 fn cfg_default() -> String {
-    let secret = rnd_scalar();
-    let pkey = (secret * G).compress();
-
     format!(r#"
-    secret = {:?}       # Scalar
-    pkey = {:?}         # CompressedRistretto  (not included in the peers)
-    
-    threshold = 0       # Number of permitted failing nodes, where #peers >= 3 * t
     log = "info"        # Set the log level
 
+    threshold = 0       # Number of permitted failing nodes, where #peers >= 3 * t
+    
     # List of valid peers
     [peers]
-    "#, secret.encode(), pkey.encode())
+    "#)
 }
 
 #[derive(Debug, Clone)]
@@ -30,21 +24,11 @@ pub struct Peer {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub secret: Scalar,
-    pub pkey: RistrettoPoint,
-
-    pub threshold: usize,
-
     pub log: LevelFilter,
 
+    pub threshold: usize,
     pub peers_hash: Vec<u8>,
     pub peers: Vec<Peer>
-}
-
-impl Drop for Config {
-    fn drop(&mut self) {
-        self.secret.clear();
-    }
 }
 
 impl Config {
@@ -61,7 +45,6 @@ impl Config {
         };
 
         let t_cfg: TomlConfig = toml::from_str(&cfg).expect("Unable to decode toml configuration!");
-        let pkey: CompressedRistretto = t_cfg.pkey.decode();
         
         let mut peers = Vec::<Peer>::with_capacity(t_cfg.peers.len());
         let mut hasher = Sha512::new();
@@ -80,24 +63,14 @@ impl Config {
             peers.push(peer);
         }
 
-        let llog = match t_cfg.log.as_ref() {
+        let log = match t_cfg.log.as_ref() {
             "info" => LevelFilter::Info,
             "warn" => LevelFilter::Warn,
             "error" => LevelFilter::Error,
             _ => panic!("Log level not recognized!")
         };
 
-        Self {
-            secret: t_cfg.secret.decode(),
-            pkey: pkey.decompress().expect("Unable to decompress pkey!"),
-            
-            threshold: t_cfg.threshold,
-
-            log: llog,
-
-            peers_hash: hasher.result().to_vec(),
-            peers
-        }
+        Self { log, threshold: t_cfg.threshold, peers_hash: hasher.result().to_vec(), peers }
     }
 }
 
@@ -106,12 +79,9 @@ impl Config {
 //--------------------------------------------------------------------------------------------
 #[derive(Deserialize, Debug)]
 struct TomlConfig {
-    secret: String,
-    pkey: String,
-
-    threshold: usize,
     log: String,
-
+    
+    threshold: usize,
     peers: HashMap<String, TomlPeer>
 }
 

@@ -1,8 +1,8 @@
 #!/bin/bash
-#tendermint unsafe_reset_all --home ./test-net/node0;
-#tendermint unsafe_reset_all --home ./test-net/node1;
-#tendermint unsafe_reset_all --home ./test-net/node2;
-#tendermint unsafe_reset_all --home ./test-net/node3;
+tendermint unsafe_reset_all --home ./test-net/node0;
+tendermint unsafe_reset_all --home ./test-net/node1;
+tendermint unsafe_reset_all --home ./test-net/node2;
+tendermint unsafe_reset_all --home ./test-net/node3;
 
 trap 'kill %1; kill %2; kill %3' SIGINT;
 tendermint node --home ./test-net/node0 &

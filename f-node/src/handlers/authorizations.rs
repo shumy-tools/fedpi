@@ -33,7 +33,9 @@ impl AuthorizationHandler {
 
         // ---------------transaction---------------
         let tx = self.store.tx();
-
+            let subject: Subject = tx.get(&sid).ok_or("Subject not found!")?;
+            consent.check(&subject)?;
+            
             // avoid consent override
             if tx.contains(&cid) {
                 return Err("Consent already exists!".into())
@@ -43,9 +45,6 @@ impl AuthorizationHandler {
             if !tx.contains(&tid) {
                 return Err("No target subject found!".into())
             }
-
-            let subject: Subject = tx.get(&sid).ok_or("Subject not found!")?;
-            consent.check(&subject)?;
 
             // create or update authorizations
             let mut auths: Authorizations = tx.get(&aid).unwrap_or_else(|| Authorizations::new());

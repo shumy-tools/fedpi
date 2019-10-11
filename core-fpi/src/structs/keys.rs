@@ -1,8 +1,9 @@
 use std::fmt::{Debug, Formatter};
 
+use crate::ids::*;
 use crate::{Result, Scalar, RistrettoPoint};
 use crate::shares::{Share, RistrettoPolynomial};
-use crate::signatures::{IndSignature, ExtSignature};
+use crate::signatures::IndSignature;
 
 use serde::{Serialize, Deserialize};
 
@@ -11,32 +12,37 @@ use serde::{Serialize, Deserialize};
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterKeyRequest {
+    pub sid: String,
     pub kid: String,
     pub peers: Vec<u8>,
-    pub sig: ExtSignature
+    pub sig: IndSignature
 }
 
 impl MasterKeyRequest {
-    pub fn sign(kid: &str, peers: &[u8], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Self {
-        let data = Self::data(kid, peers);
-        Self {
-            kid: kid.into(),
-            peers: peers.to_vec(),
-            sig: ExtSignature::sign(admin_secret, admin_key, &data)
+    pub fn sign(sid: &str, kid: &str, peers: &[u8], sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let sig_data = Self::data(sid, kid, peers);
+        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data); 
+        
+        Self { sid: sid.into(), kid: kid.into(), peers: peers.to_vec(), sig }
+    }
+
+    pub fn check(&self, subject: &Subject) -> Result<()> {
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+        let sig_data = Self::data(&self.sid, &self.kid, &self.peers);
+        if !self.sig.verify(&skey.key, &sig_data) {
+            return Err("Invalid master-key request signature!".into())
         }
+
+        Ok(())
     }
 
-    pub fn verify(&self) -> bool {
-        let data = Self::data(&self.kid, &self.peers);
-        self.sig.verify(&data)
-    }
-
-    fn data(kid: &str, peers: &[u8]) -> [Vec<u8>; 2] {
+    fn data(sid: &str, kid: &str, peers: &[u8]) -> [Vec<u8>; 3] {
         // These unwrap() should never fail, or it's a serious code bug!
+        let b_sid = bincode::serialize(sid).unwrap();
         let b_kid = bincode::serialize(kid).unwrap();
         let b_peers = bincode::serialize(peers).unwrap();
         
-        [b_kid, b_peers]
+        [b_sid, b_kid, b_peers]
     }
 }
 
@@ -148,17 +154,18 @@ impl MasterKeyVote {
 //--------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MasterKey {
+    pub sid: String,
     pub session: String,
     pub kid: String,
     pub matrix: PublicMatrix,
     pub votes: Vec<MasterKeyCompressedVote>,
     
-    pub sig: ExtSignature,       //signature from admin
+    pub sig: IndSignature,       //signature from admin
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
 impl MasterKey {
-    pub fn sign(session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], admin_secret: &Scalar, admin_key: RistrettoPoint) -> Result<Self> {
+    pub fn sign(sid: &str, session: &str, kid: &str, peers: &[u8], votes: Vec<MasterKeyVote>, n: usize, pkeys: &[RistrettoPoint], sig_s: &Scalar, sig_key: &SubjectKey) -> Result<Self> {
         // expecting responses from all peers
         if votes.len() != n {
             return Err("Expecting responses from all peers!".into())
@@ -174,23 +181,19 @@ impl MasterKey {
         let votes: Vec<MasterKeyCompressedVote> = votes.into_iter()
             .map(|vote| MasterKeyCompressedVote { shares: vote.shares, commit: vote.commit, sig: vote.sig }).collect();
 
-        let data = Self::data(session, kid, &matrix, &votes);
-        Ok(Self {
-            session: session.into(),
-            kid: kid.into(),
-            matrix,
-            votes,
-            sig: ExtSignature::sign(admin_secret, admin_key, &data),
-            _phantom: ()
-        })
+        let sig_data = Self::data(sid, session, kid, &matrix, &votes);
+        let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
+
+        Ok(Self { sid: sid.into(), session: session.into(), kid: kid.into(), matrix, votes, sig, _phantom: () })
     }
 
-    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint]) -> Result<()> {
+    pub fn check(&self, peers: &[u8], n: usize, pkeys: &[RistrettoPoint], subject: &Subject) -> Result<()> {
         if self.votes.len() != n {
             return Err("Expecting votes from all peers!".into())
         }
 
-        if !self.verify() {
+        let skey = subject.keys.last().ok_or("No active subject-key found!")?;
+        if !self.verify(&skey.key) {
             return Err("MasterKey with invalid signature!".into())
         }
 
@@ -240,19 +243,20 @@ impl MasterKey {
         (shares, commits, pkey)
     }
 
-    fn verify(&self) -> bool {
-        let data = Self::data(&self.session, &self.kid, &self.matrix, &self.votes);
-        self.sig.verify(&data)
+    fn verify(&self, key: &RistrettoPoint) -> bool {
+        let sig_data = Self::data(&self.sid, &self.session, &self.kid, &self.matrix, &self.votes);
+        self.sig.verify(&key, &sig_data)
     }
 
-    fn data(session: &str, kid: &str, matrix: &PublicMatrix, votes: &[MasterKeyCompressedVote]) -> [Vec<u8>; 4] {
+    fn data(sid: &str, session: &str, kid: &str, matrix: &PublicMatrix, votes: &[MasterKeyCompressedVote]) -> [Vec<u8>; 5] {
         // These unwrap() should never fail, or it's a serious code bug!
+        let b_sid = bincode::serialize(sid).unwrap();
         let b_session = bincode::serialize(session).unwrap();
         let b_kid = bincode::serialize(kid).unwrap();
         let b_matrix = bincode::serialize(matrix).unwrap();
         let b_votes = bincode::serialize(votes).unwrap();
 
-        [b_session, b_kid, b_matrix, b_votes]
+        [b_sid, b_session, b_kid, b_matrix, b_votes]
     }
 }
 
