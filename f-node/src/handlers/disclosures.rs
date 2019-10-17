@@ -44,11 +44,14 @@ impl DisclosureHandler {
                     let pseudo_i = &pmkey.share * &pkey.pkey;
                     
                     let encryp_i = match pkey.encrypted {
-                        true => Some(&emkey.share * &pkey.pkey),
+                        true => {
+                            let crypto = &emkey.share * &pkey.pkey;
+                            Some(crypto.Yi)
+                        },
                         false => None
                     };
 
-                    dkeys.put(&typ, &loc.lurl, (pseudo_i, encryp_i));
+                    dkeys.put(&typ, &loc.lurl, (pseudo_i.Yi, encryp_i));
                 }
             }
         }

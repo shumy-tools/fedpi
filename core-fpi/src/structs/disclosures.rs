@@ -5,7 +5,6 @@ use std::time::Duration;
 use crate::ids::*;
 use crate::structs::*;
 use crate::crypto::signatures::IndSignature;
-use crate::crypto::shares::RistrettoShare;
 use crate::{Result, Scalar, RistrettoPoint};
 
 //-----------------------------------------------------------------------------------------------------------
@@ -80,7 +79,7 @@ impl DiscloseRequest {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DiscloseResult {
-    pub disclose: String,                           // Identifies the disclose by the encoded signature
+    pub session: String,                            // Identifies the disclose by the encoded signature
     pub keys: DiscloseKeys,                         // MPC result
 
     pub sig: IndSignature,                          // Signature from peer
@@ -88,42 +87,42 @@ pub struct DiscloseResult {
 }
 
 impl DiscloseResult {
-    pub fn sign(disclose: &str, keys: DiscloseKeys, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
-        let sig_data = Self::data(disclose, &keys);
+    pub fn sign(session: &str, keys: DiscloseKeys, secret: &Scalar, key: &RistrettoPoint, index: usize) -> Self {
+        let sig_data = Self::data(session, &keys);
         let sig = IndSignature::sign(index, secret, &key, &sig_data);
         
-        Self { disclose: disclose.into(), keys, sig, _phantom: () }
+        Self { session: session.into(), keys, sig, _phantom: () }
     }
 
-    pub fn check(&self, disclose: &str, profiles: &[String], key: &RistrettoPoint) -> Result<()> {
-        if self.disclose != disclose {
-            return Err("DiscloseResult, expected the same disclose-id!".into())
+    pub fn check(&self, session: &str, profiles: &[String], key: &RistrettoPoint) -> Result<()> {
+        if self.session != session {
+            return Err("Field Constraint - (session, Expected the same session)".into())
         }
 
-        if !self.keys.constains_the_same(profiles) {
-            return Err("DiscloseResult, expected the same profile list!".into())
+        if !self.keys.constains(profiles) {
+            return Err("Field Constraint - (keys, Expected the same profile list)".into())
         }
 
-        let sig_data = Self::data(&self.disclose, &self.keys);
+        let sig_data = Self::data(&self.session, &self.keys);
         if !self.sig.verify(&key, &sig_data) {
-            return Err("Invalid disclose-result signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())
     }
     
-    fn data(disclose: &str, keys: &DiscloseKeys) -> [Vec<u8>; 2] {
+    fn data(session: &str, keys: &DiscloseKeys) -> [Vec<u8>; 2] {
         // These unwrap() should never fail, or it's a serious code bug!
-        let b_disclose = bincode::serialize(disclose).unwrap();
+        let b_session = bincode::serialize(session).unwrap();
         let b_keys = bincode::serialize(keys).unwrap();
 
-        [b_disclose, b_keys]
+        [b_session, b_keys]
     }
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct DiscloseKeys {
-    pub keys: IndexMap<String, IndexMap<String, Vec<(RistrettoShare, Option<RistrettoShare>)>>>,     //MPC result <type <lurl <share>>>
+    pub keys: IndexMap<String, IndexMap<String, Vec<(RistrettoPoint, Option<RistrettoPoint>)>>>,     //MPC result <type <lurl <share>>>
 }
 
 impl DiscloseKeys {
@@ -131,13 +130,13 @@ impl DiscloseKeys {
         Self { ..Default::default() }
     }
 
-    pub fn put(&mut self, typ: &str, loc: &str, share: (RistrettoShare, Option<RistrettoShare>)) {
-        let typs = self.keys.entry(typ.into()).or_insert_with(|| IndexMap::<String, Vec<(RistrettoShare, Option<RistrettoShare>)>>::new());
-        let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<(RistrettoShare, Option<RistrettoShare>)>::new());
+    pub fn put(&mut self, typ: &str, loc: &str, share: (RistrettoPoint, Option<RistrettoPoint>)) {
+        let typs = self.keys.entry(typ.into()).or_insert_with(|| IndexMap::<String, Vec<(RistrettoPoint, Option<RistrettoPoint>)>>::new());
+        let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<(RistrettoPoint, Option<RistrettoPoint>)>::new());
         locs.push(share);
     }
 
-    pub fn constains_the_same(&self, profiles: &[String]) -> bool {
+    pub fn constains(&self, profiles: &[String]) -> bool {
         if profiles.len() != self.keys.len() {
             return false
         }

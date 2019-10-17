@@ -301,22 +301,14 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                             for (i, rs) in shares.into_iter().enumerate() {
                                 let key = format!("{}-{}-{}", typ, loc, i);
 
-                                if n + 1 != rs.0.i as usize {
-                                    return Err(Error::new(ErrorKind::Other, "Unexpected pseudonym share index!"))
-                                }
-
                                 // collect pseudo shares
                                 let v_shares = pseudo_poly_shares.entry(key.clone()).or_insert_with(|| Vec::<RistrettoShare>::new());
-                                v_shares.push(rs.0);
+                                v_shares.push(RistrettoShare { i: (n + 1) as u32, Yi: rs.0 });
 
-                                if let Some(encrypt) = rs.1 {
-                                    if n + 1 != encrypt.i as usize {
-                                        return Err(Error::new(ErrorKind::Other, "Unexpected ecryption share index!"))
-                                    }
-
+                                if let Some(crypto) = rs.1 {
                                     // collect crypto shares
                                     let v_shares = crypto_poly_shares.entry(key).or_insert_with(|| Vec::<RistrettoShare>::new());
-                                    v_shares.push(encrypt);
+                                    v_shares.push(RistrettoShare { i: (n + 1) as u32, Yi: crypto });
                                 }
                             }
                         }
@@ -341,8 +333,8 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                         return Err(Error::new(ErrorKind::Other, "Incorrect set of crypto shares!"))
                     }
 
-                    let pseudo = rpoly.evaluate(&Scalar::zero());
-                    println!("CRYPTO {} -> {}", key, pseudo.encode());
+                    let crypto = rpoly.evaluate(&Scalar::zero());
+                    println!("CRYPTO {} -> {}", key, crypto.encode());
                 }
 
                 Ok(())

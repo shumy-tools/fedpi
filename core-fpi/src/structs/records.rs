@@ -12,13 +12,46 @@ pub const CLOSED: &str = "CLOSED";
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum RecordType {
-    Owned,                                  // Record inserted by the data-subject
-    Attached(RistrettoPoint)                // Record inserted by an external entity with a reference to a stream key
+    Owned,                                      // Record inserted by the subject owner
+    AnonymousAttach(String),                    // Record inserted by an anonymous subject with a reference to record (sig.encoded)
+    IdentifiedAttach(String, String)            // Record inserted by an identified subject (subject-id) with a reference to record (sig.encoded)
+    
+    /*TODO: --Issues--
+      * Attachments can disclose information from a set of streams, i.e.: All streams from a financial institution!
+        It's probably better to use some method to conceal this info:
+          1) Use a unique stream for each attachment. Requires institutions to have many ProfileKeys!
+      * Can IdentifiedAttach be encrypted? What should be the encryption key?
+          If the record signature if directly from the subject, the disclosure of Ek will not work!
+    */
+}
+
+impl RecordType {
+    pub fn check(&self) -> Result<()> {
+        match self {
+            RecordType::AnonymousAttach(attach) => if attach.len() > MAX_HASH_SIZE {
+                return Err(format!("Field Constraint - (attach, max-size = {})", MAX_HASH_SIZE))
+            },
+
+            RecordType::IdentifiedAttach(sid, attach) => {
+                if sid.len() > MAX_SUBJECT_ID_SIZE {
+                    return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
+                }
+
+                if attach.len() > MAX_HASH_SIZE {
+                    return Err(format!("Field Constraint - (attach, max-size = {})", MAX_HASH_SIZE))
+                }
+            },
+
+            _ => ()
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RecordData {
-    pub format: String,                     // reported data format, i.e: JSON, XML, DICOM, etc. Specifies what goes into the meta-data fields.
+    pub format: String,                     // reported data format, i.e: JSON, XML, DICOM, etc. Specifies what goes into the meta/data fields.
     pub meta: Vec<u8>,                      // open access metadata for indexation: DICOM(Modality, Laterality, Columns, Rows, etc)
     pub data: Vec<u8>                       // data that may be in encrypted form. Ek[data] where H(y.Pe) = H(e.Y) = k
 }
@@ -41,13 +74,15 @@ impl RecordData {
     }
 }
 
+// Records should not have any timestamp associated, cannot use IndSignature.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Record {
     pub prev: String,
     pub typ: RecordType,                    // is owned or attached from external entity?
     pub rdata: RecordData,
-    pub sig: Signature,                     // records should not have any timestamp associated
-    _phantom: () // force use of constructor
+    
+    pub sig: Signature,
+    #[serde(skip)] _phantom: () // force use of constructor
 }
 
 impl Record {
@@ -63,6 +98,8 @@ impl Record {
             return Err(format!("Field Constraint - (prev, max-size = {})", MAX_HASH_SIZE))
         }
 
+        self.typ.check()?;
+
         self.rdata.check()?;
 
         let prev = match last {
@@ -73,11 +110,12 @@ impl Record {
             },
             
             Some(last) => {
-                // TODO: verify if the stream is not closed?
+                // verify if the stream is not closed
                 if last.rdata.format == CLOSED {
                     return Err("The stream is closed!".into())
                 }
 
+                // verify the stream chain
                 if self.prev != last.sig.encoded {
                     return Err("Record is not part of the stream!".into())
                 }
@@ -116,7 +154,7 @@ impl Record {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct NewRecord {
     pub record: Record,
-    pub pseudonym: RistrettoPoint,      // pseudonym or stream identification
+    pub pseudonym: RistrettoPoint,      // pseudonym or stream identification. Should I use SHA-256(pseudonym) instead?
     pub base: RistrettoPoint            // base-point for signature verification (must be one of the existing master-keys)
 }
 

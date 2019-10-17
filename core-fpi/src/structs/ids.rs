@@ -207,8 +207,8 @@ impl Subject {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SubjectKey {
     pub key: RistrettoPoint,                        // The public key
+
     pub sig: IndSignature,                          // Signature from the previous key (if exists) for (sid, index, key)
-    
     #[serde(skip)] _phantom: () // force use of constructor
 }
 
@@ -412,8 +412,8 @@ pub struct ProfileKey {
     pub index: usize,                       // Profile key index on the vector
     pub encrypted: bool,                    // is the stream encrypted
     pub pkey: RistrettoPoint,               // Public key to derive the pseudonym
+
     pub sig: IndSignature,                  // Subject signature for (sid, typ, lurl, index, key)
-    
     #[serde(skip)] _phantom: () // force use of constructor
 }
 

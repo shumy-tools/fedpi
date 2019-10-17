@@ -28,8 +28,8 @@ const MAX_LOCATION_ID_SIZE: usize = 256;
 
 const MAX_KEY_CHAIN: usize = 16;
 
-const MAX_META_SIZE: usize = 1024 * 1024;
-const MAX_DATA_SIZE: usize = 1024 * 1024 * 1024; // max 1MB per record (record's structures must be designed around this limitation)
+const MAX_META_SIZE: usize = 1024 * 1024 * 1024;        // max 1MB per record (streams must be designed around this limitation)
+const MAX_DATA_SIZE: usize = 100 * MAX_META_SIZE;       // max 100MB per record (streams must be designed around this limitation)
 
 pub trait Constraints {
     fn sid(&self) -> &str;

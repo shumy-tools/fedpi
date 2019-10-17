@@ -17,6 +17,11 @@ use crate::db::*;
 
 const TIMESTAMP_THRESHOLD: u64 = 60;
 
+/* TODO: replay attack protections.
+    1) Requests should be idempotent and have limited timestamps ranges
+    2) Responses should be encrypted with the current subject-key. Even if someone uses the same request, responses can't be read.
+*/
+
 // decode and log dispatch messages to the respective handlers
 pub struct Processor {
     store: Arc<AppDB>,
