@@ -41,8 +41,9 @@ impl Constraints for Subject {
             return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
         }
 
-        if self.keys.len() > MAX_SUBJECT_KEY_SIZE {
-            return Err(format!("Field Constraint - (keys, max-size = {})", MAX_SUBJECT_KEY_SIZE))
+        // it's very important to only submit one key per transaction.
+        if self.keys.len() > 1 {
+            return Err(format!("Field Constraint - (keys, max-size = {})", 1))
         }
 
         if self.profiles.len() > MAX_PROFILES {
@@ -165,9 +166,10 @@ impl Subject {
     }
 
     fn check_evolve(&self, current: &Subject) -> Result<()>  {
-        // check the key
+        // it's very important to only submit one key per transaction.
+
         let active_key = current.keys.last().ok_or("Current subject must have an active key!")?;
-        let new_key = self.keys.last().ok_or("No subject-key at expected index!")?;
+        let new_key = self.keys.last().ok_or("key found for subject evolution!")?;
 
         if active_key.sig.index + 1 != new_key.sig.index {
             return Err("Incorrect index for new subject-key!".into())
@@ -283,16 +285,16 @@ impl Profile {
         self.locations.get(lurl)
     }
 
-    pub fn evolve(&self, sid: &str, lurl: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileLocation) {
+    pub fn evolve(&self, sid: &str, lurl: &str, encrypted: bool, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileLocation) {
         match self.locations.get(lurl) {
             None => {
                 let mut location = ProfileLocation::new(lurl);
-                let (secret, pkey) = location.evolve(sid, &self.typ, sig_s, sig_key);
+                let (secret, pkey) = location.evolve(sid, &self.typ, encrypted, sig_s, sig_key);
                 location.chain.push(pkey);
                 (secret, location)
             },
             Some(location) => {
-                let (secret, pkey) = location.evolve(sid, &self.typ, sig_s, sig_key);
+                let (secret, pkey) = location.evolve(sid, &self.typ, encrypted, sig_s, sig_key);
 
                 let mut location = ProfileLocation::new(lurl);
                 location.chain.push(pkey);
@@ -360,13 +362,13 @@ impl ProfileLocation {
         Self { lurl: lurl.into(), ..Default::default() }
     }
 
-    pub fn evolve(&self, sid: &str, typ: &str, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileKey) {
+    pub fn evolve(&self, sid: &str, typ: &str, encrypted: bool, sig_s: &Scalar, sig_key: &SubjectKey) -> (Scalar, ProfileKey) {
         let secret = rnd_scalar();
-        let key = secret * G;
+        let pkey = secret * G;
 
         let pkey = match self.chain.last() {
-            None => ProfileKey::sign(sid, typ, &self.lurl, 0, key, sig_s, sig_key),
-            Some(active) => ProfileKey::sign(sid, typ, &self.lurl, active.index + 1, key, sig_s, sig_key)
+            None => ProfileKey::sign(sid, typ, &self.lurl, 0, encrypted, pkey, sig_s, sig_key),
+            Some(active) => ProfileKey::sign(sid, typ, &self.lurl, active.index + 1, encrypted, pkey, sig_s, sig_key)
         };
 
         (secret, pkey)
@@ -408,7 +410,8 @@ impl ProfileLocation {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ProfileKey {
     pub index: usize,                       // Profile key index on the vector
-    pub key: RistrettoPoint,                // The profile public key
+    pub encrypted: bool,                    // is the stream encrypted
+    pub pkey: RistrettoPoint,               // Public key to derive the pseudonym
     pub sig: IndSignature,                  // Subject signature for (sid, typ, lurl, index, key)
     
     #[serde(skip)] _phantom: () // force use of constructor
@@ -418,18 +421,19 @@ impl Debug for ProfileKey {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("ProfileKey")
             .field("index", &self.index)
-            .field("key", &self.key.encode())
+            .field("encrypted", &self.encrypted)
+            .field("pkey", &self.pkey.encode())
             .field("sig", &self.sig)
             .finish()
     }
 }
 
 impl ProfileKey {
-    pub fn sign(sid: &str, typ: &str, lurl: &str, index: usize, skey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
-        let sig_data = Self::data(sid, typ, lurl, index, &skey);
+    pub fn sign(sid: &str, typ: &str, lurl: &str, index: usize, encrypted: bool, pkey: RistrettoPoint, sig_s: &Scalar, sig_key: &SubjectKey) -> Self {
+        let sig_data = Self::data(sid, typ, lurl, index, encrypted, &pkey);
         let sig = IndSignature::sign(sig_key.sig.index, sig_s, &sig_key.key, &sig_data);
         
-        Self { index, key: skey, sig, _phantom: () }
+        Self { index, encrypted, pkey, sig, _phantom: () }
     }
 
     fn verify(&self, sid: &str, typ: &str, lurl: &str, sig_key: &SubjectKey, threshold: Duration) -> Result<()> {
@@ -437,7 +441,7 @@ impl ProfileKey {
             return Err("Field Constraint - (sig, Timestamp out of valid range)".into())
         }
 
-        let sig_data = Self::data(sid, typ, lurl, self.index, &self.key);
+        let sig_data = Self::data(sid, typ, lurl, self.index, self.encrypted, &self.pkey);
         if !self.sig.verify(&sig_key.key, &sig_data) {
             return Err("Field Constraint - (sig, Invalid signature)".into())
         }
@@ -445,17 +449,18 @@ impl ProfileKey {
         Ok(())
     }
 
-    fn data(sid: &str, typ: &str, lurl: &str, index: usize, key: &RistrettoPoint) -> [Vec<u8>; 5] {
-        let c_key = key.compress();
+    fn data(sid: &str, typ: &str, lurl: &str, index: usize, encrypted: bool, pkey: &RistrettoPoint) -> [Vec<u8>; 6] {
+        let p_key = pkey.compress();
 
         // These unwrap() should never fail, or it's a serious code bug!
         let b_sid = bincode::serialize(sid).unwrap();
         let b_typ = bincode::serialize(typ).unwrap();
         let b_lurl = bincode::serialize(lurl).unwrap();
         let b_index = bincode::serialize(&index).unwrap();
-        let b_key = bincode::serialize(&c_key).unwrap();
+        let b_encrypted = bincode::serialize(&encrypted).unwrap();
+        let b_pkey = bincode::serialize(&p_key).unwrap();
 
-        [b_sid, b_typ, b_lurl, b_index, b_key]
+        [b_sid, b_typ, b_lurl, b_index, b_encrypted, b_pkey]
     }
 }
 
@@ -478,10 +483,10 @@ mod tests {
         let (_, skey1) = new1.evolve(sig_s1);
 
         let mut p1 = Profile::new("Assets");
-        p1.push(p1.evolve(&sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        p1.push(p1.evolve(&sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         let mut p2 = Profile::new("Finance");
-        p2.push(p2.evolve(&sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        p2.push(p2.evolve(&sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         new1
             .push(p1)
@@ -502,7 +507,7 @@ mod tests {
         // Updating Profile
         // -------------------------------------------------
         let mut p3 = Profile::new("HealthCare");
-        p3.push(p3.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        p3.push(p3.evolve(sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         let mut update2 = Subject::new(sid);
         update2.push(p3);
@@ -515,7 +520,7 @@ mod tests {
         let p2 = new1.find("Finance").unwrap().clone();
 
         let mut empty_p2 = Profile::new("Finance");
-        empty_p2.push(p2.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        empty_p2.push(p2.evolve(sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         let mut update3 = Subject::new(sid);
         update3.push(empty_p2.clone());
@@ -528,7 +533,7 @@ mod tests {
         new1.merge(update3);
 
         let mut empty_p3 = Profile::new("Finance");
-        empty_p3.push(empty_p2.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        empty_p3.push(empty_p2.evolve(sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         let mut update4 = Subject::new(sid);
         update4.push(empty_p3);
@@ -549,7 +554,7 @@ mod tests {
         let (_, skey1) = new1.evolve(sig_s1);
         
         let mut p1 = Profile::new("Assets");
-        p1.push(p1.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1);
+        p1.push(p1.evolve(sid, "https://profile-url.org", false, &sig_s1, &skey1).1);
 
         new1
             .push(p1.clone())
@@ -583,13 +588,13 @@ mod tests {
 
         let mut incorrect = Subject::new(sid);
         incorrect.keys.push(skey3);
-        assert!(incorrect.verify(&new1, Duration::from_secs(5)) == Err("Invalid subject-key signature!".into()));
+        assert!(incorrect.verify(&new1, Duration::from_secs(5)) == Err("Field Constraint - (sig, Invalid signature)".into()));
 
         //--------------------------------------------------
         // Updating Profile
         // -------------------------------------------------
         let mut p2 = Profile::new("Assets");
-        let mut p2_loc = p1.evolve(sid, "https://profile-url.org", &sig_s1, &skey1).1;
+        let mut p2_loc = p1.evolve(sid, "https://profile-url.org", false, &sig_s1, &skey1).1;
         let mut p2_key = &mut p2_loc.chain[0];
         p2_key.index = 0usize;
         p2.push(p2_loc);

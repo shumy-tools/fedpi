@@ -198,8 +198,8 @@ impl Constraints for MasterKey {
             return Err(format!("Field Constraint - (sid, max-size = {})", MAX_SUBJECT_ID_SIZE))
         }
 
-        if self.session.len() > MAX_SESSION_SIZE {
-            return Err(format!("Field Constraint - (session, max-size = {})", MAX_SESSION_SIZE))
+        if self.session.len() > MAX_HASH_SIZE {
+            return Err(format!("Field Constraint - (session, max-size = {})", MAX_HASH_SIZE))
         }
 
         if self.kid.len() > MAX_KEY_ID_SIZE {

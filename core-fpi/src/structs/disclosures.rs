@@ -123,7 +123,7 @@ impl DiscloseResult {
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 pub struct DiscloseKeys {
-    pub keys: IndexMap<String, IndexMap<String, Vec<RistrettoShare>>>,     //MPC result <type <lurl <share>>>
+    pub keys: IndexMap<String, IndexMap<String, Vec<(RistrettoShare, Option<RistrettoShare>)>>>,     //MPC result <type <lurl <share>>>
 }
 
 impl DiscloseKeys {
@@ -131,9 +131,9 @@ impl DiscloseKeys {
         Self { ..Default::default() }
     }
 
-    pub fn put(&mut self, typ: &str, loc: &str, share: RistrettoShare) {
-        let typs = self.keys.entry(typ.into()).or_insert_with(|| IndexMap::<String, Vec<RistrettoShare>>::new());
-        let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<RistrettoShare>::new());
+    pub fn put(&mut self, typ: &str, loc: &str, share: (RistrettoShare, Option<RistrettoShare>)) {
+        let typs = self.keys.entry(typ.into()).or_insert_with(|| IndexMap::<String, Vec<(RistrettoShare, Option<RistrettoShare>)>>::new());
+        let locs = typs.entry(loc.into()).or_insert_with(|| Vec::<(RistrettoShare, Option<RistrettoShare>)>::new());
         locs.push(share);
     }
 

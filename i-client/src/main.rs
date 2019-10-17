@@ -51,6 +51,10 @@ fn main() {
             .arg(Arg::with_name("lurl")
                 .help("Select the profile location")
                 .takes_value(true)
+                .required(true))
+            .arg(Arg::with_name("encrypted")
+                .help("IS the profile stream encrypted?")
+                .takes_value(true)
                 .required(true)))
         .subcommand(SubCommand::with_name("consent")
             .about("Authorize full-disclosure to another subject-id for a set of profiles")
@@ -172,7 +176,10 @@ fn main() {
         let typ = matches.value_of("type").unwrap().to_owned();
         let lurl = matches.value_of("lurl").unwrap().to_owned();
         
-        if let Err(e) = sm.profile(&typ, &lurl) {
+        let encrypted = matches.value_of("encrypted").unwrap().to_owned();
+        let encrypted = encrypted.parse().unwrap();
+        
+        if let Err(e) = sm.profile(&typ, &lurl, encrypted) {
             println!("ERROR -> {}", e);
         }
     } else if matches.is_present("consent") {

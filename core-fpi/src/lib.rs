@@ -16,9 +16,6 @@ pub use crate::structs::*;
 pub const G: RistrettoPoint = RISTRETTO_BASEPOINT_POINT;
 pub const G_TABLE: RistrettoBasepointTable = RISTRETTO_BASEPOINT_TABLE;
 
-pub const OPEN: &str = "OPEN";
-pub const CLOSE: &str = "CLOSE";
-
 pub type Result<T> = std::result::Result<T, String>;
 
 /*impl From<&'static str> for std::io::Error {

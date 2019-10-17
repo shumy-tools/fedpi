@@ -16,8 +16,8 @@ use core_fpi::keys::*;
 use core_fpi::messages::*;
 
 pub const STATE: &str = "$state";
-pub const MASTER: &str = "master";
-//pub const ENCRYPT: &str = "encrypt";
+pub const PMASTER: &str = "p-master";
+pub const EMASTER: &str = "e-master";
 
 //--------------------------------------------------------------------
 // Rules to derive keys. Always use a prefix to avoid security issues, such as data override from different protocols!

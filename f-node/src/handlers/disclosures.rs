@@ -25,7 +25,9 @@ impl DisclosureHandler {
         let tid = sid(&disclose.target);
         let aid = aid(&disclose.target);
 
-        let mkey = self.store.key(MASTER).ok_or("Master-key unavailable!")?;
+        let pmkey = self.store.key(PMASTER).ok_or("Pseudonym master-key unavailable!")?;
+        let emkey = self.store.key(EMASTER).ok_or("Encryption master-key unavailable!")?;
+
         let target: Subject = self.store.get(&tid).ok_or("No target subject found!")?;
         let auths: Authorizations = self.store.get(&aid).ok_or("No authorizations found for target!")?;
 
@@ -39,8 +41,14 @@ impl DisclosureHandler {
             let prof = target.profiles.get(typ).ok_or("No profile found, but there is an authorization!")?;
             for (_, loc) in prof.locations.iter() {
                 for pkey in loc.chain.iter() {
-                    let pseudo_i = &mkey.share * &pkey.key;
-                    dkeys.put(&typ, &loc.lurl, pseudo_i);
+                    let pseudo_i = &pmkey.share * &pkey.pkey;
+                    
+                    let encryp_i = match pkey.encrypted {
+                        true => Some(&emkey.share * &pkey.pkey),
+                        false => None
+                    };
+
+                    dkeys.put(&typ, &loc.lurl, (pseudo_i, encryp_i));
                 }
             }
         }

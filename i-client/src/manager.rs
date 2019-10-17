@@ -173,7 +173,7 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
         }
     }
 
-    pub fn profile(&mut self, typ: &str, lurl: &str) -> Result<()> {
+    pub fn profile(&mut self, typ: &str, lurl: &str, encrypted: bool) -> Result<()> {
         self.check_pending()?;
 
         match &self.sto {
@@ -182,15 +182,15 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 let skey = my.subject.keys.last().ok_or_else(|| Error::new(ErrorKind::Other, "Subject doesn't have a key!"))?;
 
                 let mut profile = Profile::new(typ);
-                let (p_secret, location) = match my.subject.find(typ) {
-                    None => profile.evolve(&self.sid, &lurl, &my.secret, skey),
-                    Some(current) => current.evolve(&self.sid, &lurl, &my.secret, skey)
+                let (secret, location) = match my.subject.find(typ) {
+                    None => profile.evolve(&self.sid, &lurl, encrypted, &my.secret, skey),
+                    Some(current) => current.evolve(&self.sid, &lurl, encrypted, &my.secret, skey)
                 };
                 
                 profile.push(location);
 
                 let mut profile_secrets = HashMap::<String, Scalar>::new();
-                profile_secrets.insert(ProfileLocation::pid(typ, lurl), p_secret);
+                profile_secrets.insert(ProfileLocation::pid(typ, lurl), secret);
 
                 let mut subject = Subject::new(&self.sid);
                 subject.push(profile);
@@ -293,31 +293,56 @@ impl<F: Fn(&Peer, Commit) -> Result<()>, Q: Fn(&Peer, Request) -> Result<Respons
                 }
                 
                 // check and combine results to get pseudonyms
-                let mut poly_shares = HashMap::<String, Vec<RistrettoShare>>::new();
+                let mut pseudo_poly_shares = HashMap::<String, Vec<RistrettoShare>>::new();
+                let mut crypto_poly_shares = HashMap::<String, Vec<RistrettoShare>>::new();
                 for (n, dr) in results.into_iter() {
                     for (typ, locs) in dr.keys.keys.into_iter() {
                         for (loc, shares) in locs.into_iter() {
                             for (i, rs) in shares.into_iter().enumerate() {
-                                if n + 1 != rs.i as usize {
-                                    return Err(Error::new(ErrorKind::Other, "Unexpected share index!"))
+                                let key = format!("{}-{}-{}", typ, loc, i);
+
+                                if n + 1 != rs.0.i as usize {
+                                    return Err(Error::new(ErrorKind::Other, "Unexpected pseudonym share index!"))
                                 }
 
-                                let key = format!("{}-{}-{}", typ, loc, i);
-                                let v_shares = poly_shares.entry(key).or_insert_with(|| Vec::<RistrettoShare>::new());
-                                v_shares.push(rs);
+                                // collect pseudo shares
+                                let v_shares = pseudo_poly_shares.entry(key.clone()).or_insert_with(|| Vec::<RistrettoShare>::new());
+                                v_shares.push(rs.0);
+
+                                if let Some(encrypt) = rs.1 {
+                                    if n + 1 != encrypt.i as usize {
+                                        return Err(Error::new(ErrorKind::Other, "Unexpected ecryption share index!"))
+                                    }
+
+                                    // collect crypto shares
+                                    let v_shares = crypto_poly_shares.entry(key).or_insert_with(|| Vec::<RistrettoShare>::new());
+                                    v_shares.push(encrypt);
+                                }
                             }
                         }
                     }
                 }
 
-                for (key, shares) in poly_shares.iter() {
+                // reconstruct pseudonyms
+                for (key, shares) in pseudo_poly_shares.iter() {
                     let rpoly = RistrettoPolynomial::reconstruct(&shares);
                     if rpoly.degree() != self.config.threshold {
-                        return Err(Error::new(ErrorKind::Other, "Incorrect set of shares!"))
+                        return Err(Error::new(ErrorKind::Other, "Incorrect set of pseudo shares!"))
                     }
 
                     let pseudo = rpoly.evaluate(&Scalar::zero());
-                    println!("PSEUDONYM {} -> {}", key, pseudo.encode());
+                    println!("PSEUDO {} -> {}", key, pseudo.encode());
+                }
+
+                // reconstruct encryption secrets
+                for (key, shares) in crypto_poly_shares.iter() {
+                    let rpoly = RistrettoPolynomial::reconstruct(&shares);
+                    if rpoly.degree() != self.config.threshold {
+                        return Err(Error::new(ErrorKind::Other, "Incorrect set of crypto shares!"))
+                    }
+
+                    let pseudo = rpoly.evaluate(&Scalar::zero());
+                    println!("CRYPTO {} -> {}", key, pseudo.encode());
                 }
 
                 Ok(())
@@ -484,8 +509,8 @@ pub struct Update {
 //-----------------------------------------------------------------------------------------------------------
 #[derive(Serialize, Deserialize, Clone)]
 pub struct MySubject {
-    secret: Scalar,                                 // current subject-key secret
-    profile_secrets: HashMap<String, Scalar>,       // current profile-key secrets <PID, Secret>
+    secret: Scalar,                                                     // current subject-key secret
+    profile_secrets: HashMap<String, Scalar>,         // current profile-key secrets <PID, Secret>
     
     subject: Subject,
     auths: Authorizations
@@ -503,6 +528,7 @@ impl Drop for MySubject {
 impl Debug for MySubject {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         let p_secrets: Vec<String> = self.profile_secrets.iter().map(|(key, item)| format!("{} -> {}", key, item.encode())).collect();
+
         fmt.debug_struct("MySubject")
             .field("secret", &self.secret.encode())
             .field("profile_secrets", &p_secrets)
