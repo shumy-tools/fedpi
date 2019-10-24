@@ -104,7 +104,7 @@ impl Record {
 
         let prev = match last {
             None => if self.prev != OPEN {
-                return Err("Record not marked as open!".into())
+                return Err("Field Constraint - (prev, Record not marked as open)".into())
             } else {
                 OPEN
             },
@@ -117,7 +117,7 @@ impl Record {
 
                 // verify the stream chain
                 if self.prev != last.sig.encoded {
-                    return Err("Record is not part of the stream!".into())
+                    return Err("Field Constraint - (prev, Record is not part of the stream)".into())
                 }
 
                 // verify signature of last record with the same key. The chain must have the same key.
@@ -133,7 +133,7 @@ impl Record {
         // verify the record signature
         let sig_data = Self::data(prev, &self.typ, &self.rdata);
         if !self.sig.verify(pseudonym, base, &sig_data) {
-            return Err("Invalid record signature!".into())
+            return Err("Field Constraint - (sig, Invalid signature)".into())
         }
 
         Ok(())
